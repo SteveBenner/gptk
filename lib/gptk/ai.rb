@@ -1,10 +1,11 @@
 module GPTK
   module AI
-    # Query ChatGPT API for categorization of each and every item in a given set
+    # Query a an AI API for categorization of each and every item in a given set
     # @param doc (GPTK::Doc)
-    # @param items (Array<String>)
+    # @param items (Array)
     # @param categories (Hash<Integer => Hash<title: String, description: String>>)
     # @return ??? todo
+    # todo: test
     def self.categorize_items(doc, items, categories)
       abort 'Error: no items found!' if items.empty?
       abort 'Error: no categories found!' if categories.empty?
@@ -15,9 +16,9 @@ module GPTK
         # Send the prompt to ChatGPT using the chat API, and retrieve the response
         response = doc.client.chat(
           parameters: {
-            model: GPTK::Config::OPENAI_GPT_MODEL,
+            model: GPTK::AI::OPENAI_GPT_MODEL,
             messages: [{ role: 'user', content: prompt }],
-            temperature: GPTK::Config::OPENAI_TEMPERATURE
+            temperature: GPTK::AI::OPENAI_TEMPERATURE
           }
         )
         content = response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
@@ -28,7 +29,7 @@ module GPTK
       end
       abort 'Error: no output!' unless results && !results.empty?
       puts "Successfully categorized #{results.values.reduce(0) {|j, loe| j += loe.count; j }} items!"
-      doc.last_output = results # Cache results
+      doc.last_output = results # Cache results of the complete operation
       results
     end
   end

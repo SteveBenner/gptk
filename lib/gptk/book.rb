@@ -4,7 +4,7 @@ module GPTK
   class Book
     attr_reader :chapters, :client, :data
 
-    def initialize(api_client, outline, mode)
+    def initialize(api_client, outline, mode=GPTK::MODE)
       @client = api_client # Platform-agnostic API connection object (for now just supports OpenAI)
       @outline = outline # Reference document for book generation
       @chapters = [] # Book content

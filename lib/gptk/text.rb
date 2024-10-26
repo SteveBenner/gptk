@@ -21,10 +21,10 @@ STRING
       results
     end
 
-    # Parse an enumerated list of categories within a single String into structured data
+    # Parse an enumerated list of categories within a single String into structured data (see EXAMPLE_CATEGORY_TEXT)
     # @param text (String) category text
     # @return Hash<Integer => Hash<title: String, description: String>>
-    def self.parse_categories(text)
+    def self.parse_categories_str(text)
       sorted_categories = text.split(/(?=\*\*\d+\.)/)
       sorted_categories.reduce({}) do |output, category|
         if category =~ /\*\*(\d+)\.\s*(.*?)\*\*\s*(.*)/m
