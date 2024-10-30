@@ -4,6 +4,9 @@ module GPTK
     chapter_fragments = 3 # This determines how many chapter fragments are in a chapter. Larger values = more words.
     chapter_fragment_words = 1000 # How large each chapter fragment is
     CONFIG = {
+      num_chapters: num_chapters,
+      chapter_fragments: chapter_fragments,
+      chapter_fragment_words: chapter_fragment_words,
       chapter_min_words: 3000, # Unused,
       chapter_max_words: 5500, # Unused,
       chapter_limit_tolerance: 500, # Unused; Number of words the chapter can differ from the maximum word limit,

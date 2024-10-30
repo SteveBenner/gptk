@@ -1,7 +1,7 @@
 module GPTK
   class Doc
-    attr_reader :input, :output_file, :content
-    attr_accessor :client, :last_output
+    attr_reader :last_output
+    attr_accessor :client, :output_file, :content
 
     def initialize(api_client, output_file=nil, content=nil, mode=GPTK::MODE)
       abort 'Error: invalid client!' unless api_client
@@ -16,9 +16,10 @@ module GPTK
     #   - Chapter title
     #     - Chapter content
     # @param [String] title The document title, rendered as an H1 header
-    # @param [Hash<Integer => Hash<title: String, description: String>>] chapters List of book chapters
+    # @param [Hash<Integer => Hash<title: String, description: String>>] chapters List of chapters
     # @param [Array<String>] content Content (categorized by chapter)
     # @return [String] fully composed document
+    # todo: test
     def create_doc1(title, chapters, content)
       str = ''
       str << "# #{title}\n\n"
@@ -31,7 +32,17 @@ module GPTK
           str << "\n\n"
         end
       end
+      @last_output = str # Cache results of the operation
       str
+    end
+
+    # Save the current document content to file
+    def save
+      unless @content || @last_output
+        puts 'Error: no document content or last operation results found!'
+        puts 'Perform an operation or assign a value to the Doc `content` variable.'
+      end
+      # todo: account for existing file
     end
 
     # def submit_batch_file(file_path)

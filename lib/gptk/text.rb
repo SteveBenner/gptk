@@ -1,6 +1,6 @@
 module GPTK
   module Text
-    EXAMPLE_CATEGORY_TEXT = <<STRING
+    EXAMPLE_CATEGORY_TEXT1 = <<STRING
 **1\. Consciousness & Self-Awareness**  
 These MetaTations explore the nature of the mind, consciousness, and self-awareness. They challenge the reader to understand the complexity of the self, the mind’s relationship with the universe, and the experience of awareness. Examples include reflections on consciousness as a “Great Hall” and considerations of the internal versus external experiences of the mind.
 
@@ -22,17 +22,23 @@ STRING
     end
 
     # Parse an enumerated list of categories within a single String into structured data (see EXAMPLE_CATEGORY_TEXT)
-    # @param text (String) category text
+    # @param text (String)`` category text
     # @return Hash<Integer => Hash<title: String, description: String>>
     def self.parse_categories_str(text)
-      sorted_categories = text.split(/(?=\*\*\d+\.)/)
+      sorted_categories = text.split(/(?=\*\*\d+\\\.)/)
+      if sorted_categories.size == 1
+        puts 'Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str` as well as supplied text content.'
+        return nil
+      end
       sorted_categories.reduce({}) do |output, category|
-        if category =~ /\*\*(\d+)\.\s*(.*?)\*\*\s*(.*)/m
+        if category =~ /\*\*(\d+)\\\.\s*(.*?)\*\*\s*(.*)/m
           number = $1.to_i
           title = $2.strip
           description = $3.strip
           output[number] = { title: title, description: description }
-        else abort 'Error: parsing categories failed!'
+        else
+          puts 'Error: parsing categories failed!'
+          nil
         end
         output
       end

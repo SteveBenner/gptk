@@ -1,5 +1,10 @@
 module GPTK
   module AI
+    @last_output = nil # Track the cached output of the latest operation
+    def self.last_output
+      @last_output
+    end
+
     # Query a an AI API for categorization of each and every item in a given set
     # @param doc (GPTK::Doc)
     # @param items (Array)
@@ -16,9 +21,9 @@ module GPTK
         # Send the prompt to ChatGPT using the chat API, and retrieve the response
         response = doc.client.chat(
           parameters: {
-            model: GPTK::AI::OPENAI_GPT_MODEL,
+            model: GPTK::AI::CONFIG[:openai_gpt_model],
             messages: [{ role: 'user', content: prompt }],
-            temperature: GPTK::AI::OPENAI_TEMPERATURE
+            temperature: GPTK::AI::CONFIG[:openai_temperature]
           }
         )
         content = response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
@@ -29,7 +34,7 @@ module GPTK
       end
       abort 'Error: no output!' unless results && !results.empty?
       puts "Successfully categorized #{results.values.reduce(0) {|j, loe| j += loe.count; j }} items!"
-      doc.last_output = results # Cache results of the complete operation
+      @last_output = results # Cache results of the complete operation
       results
     end
   end
