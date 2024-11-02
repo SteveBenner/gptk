@@ -1,6 +1,6 @@
 module GPTK
   class Doc
-    attr_reader :last_output
+    attr_reader :last_output, :data
     attr_accessor :client, :output_file, :content
 
     def initialize(api_client, output_file=nil, content=nil, mode=GPTK::MODE)
@@ -9,6 +9,11 @@ module GPTK
       @output_file = output_file || ''
       @content = content
       @mode = mode
+      @data = { # Data points to track while utilizing APIs
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cached_tokens: 0
+      }
     end
 
     # Document output format 1:
