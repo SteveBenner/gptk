@@ -19,6 +19,7 @@ module GPTK
       data[:prompt_tokens] += response.dig 'usage', 'prompt_tokens'
       data[:completion_tokens] += response.dig 'usage', 'completion_tokens'
       data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
+      puts response # todo: remove for production
       # Return the AI's response message
       response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
     end

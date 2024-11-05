@@ -1,4 +1,6 @@
 module GPTK
+  # todo: handle cases where no 'instructions' file or content is present
+  # todo: incorporate `continuity` prompt parameter
   class Book
     attr_reader :chapters, :client, :last_output
     attr_accessor :parsers
@@ -9,7 +11,7 @@ module GPTK
                    output_filename='',
                    rec_prompt='',
                    parsers=CONFIG[:parsers],
-                   mode=GPTK::MODE)
+                   mode=GPTK.mode)
       @client = api_client # Platform-agnostic API connection object (for now just supports OpenAI)
       # Reference document for book generation
       @outline = <<~OUTLINE_STR
@@ -19,6 +21,7 @@ OUTLINE
 
 OUTLINE
       OUTLINE_STR
+      @outline = @outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
       @instructions = ::File.exist?(instructions) ? ::File.read(instructions) : instructions
       @output_file = ::File.open output_filename, 'w+'
       @parsers = parsers
@@ -69,13 +72,13 @@ OUTLINE
         # Compose the chapter fragment by fragment
         chapter << content[:chapter_fragment] + ' '
         # Generate a summary of the current chapter, fragment by fragment
-        chapter_summary << content[:chapter_summary] + ' '
+        chapter_summary << content[:chapter_summary] + ' ' if content[:chapter_summary]
       end
 
       @data[:current_chapter] += 1 # For data tracking purposes
 
       # Revise chapter if 'recommendations_prompt' text or file are given
-      chapter = revise_chapter(chapter, recommendations_prompt) if recommendations_prompt
+      chapter = revise_chapter(chapter, recommendations_prompt) unless recommendations_prompt.empty?
 
       # Count and tally the total number of words generated for each chapter
       @data[:word_counts] << GPTK::Text.word_count(chapter)
@@ -85,7 +88,7 @@ OUTLINE
 
     # Revise the chapter based upon a set of specific guidelines, using ChatGPT
     def revise_chapter(chapter, recommendations_prompt)
-      puts 'Revising chapter...'
+      puts "Revising chapter..."
       revision_prompt = "Please revise the following chapter content:\n\n" + chapter + "\n\nREVISIONS:\n" +
         recommendations_prompt + "\nDo NOT change the chapter title or number--this must remain the same as the original, and must accurately reflect the outline."
       GPTK::AI.query @client, revision_prompt, @data
@@ -94,6 +97,7 @@ OUTLINE
     # Parse a ChatGPT response text into the chapter content and the 'command code'
     # Note: due to the tendency of ChatGPT to produce variance in output, significant
     # reformatting of the output is required to ensure consistency
+    # todo: remove revision prompt
     def parse_response(text, parsers=nil)
       # Split the response based on the chapter fragment and the summary (requires Unicode support!)
       parts = text.split(/\n{1,2}\p{Pd}{1,3}|\*{1,3}\s?\n{1,2}/u)
@@ -123,20 +127,31 @@ OUTLINE
     end
 
     # Output useful information (metadata) after a run, (or part of a run) to STDOUT by default, or a file if given
-    def output_run_info(file=STDOUT)
-      io_stream = file ? File.open(file, 'w+') : STDOUT
+    def output_run_info(file=nil)
+      io_stream = file ? ::File.open(file, 'a+') : STDOUT
+      io_stream.seek 0, IO::SEEK_END
       io_stream.puts "Successfully generated #{CONFIG[:num_chapters]} chapters, for a total of #{@data[:word_counts].reduce &:+} words."
-      io_stream.puts <<-STRING
-    Total token usage:
-    - Prompt tokens used: #{@data[:prompt_tokens]}
-    - Completion tokens used: #{@data[:completion_tokens]}
-    - Total tokens used: #{@data[:prompt_tokens] + @data[:completion_tokens]}
-    - Cached tokens used: #{@data[:cached_tokens]}
-    - Cached token percentage: #{((@data[:cached_tokens].to_f / @data[:prompt_tokens]) * 100).round 2}%
-  STRING
+      io_stream.puts <<~STRING
+        Total token usage:
+        - Prompt tokens used: #{@data[:prompt_tokens]}
+        - Completion tokens used: #{@data[:completion_tokens]}
+        - Total tokens used: #{@data[:prompt_tokens] + @data[:completion_tokens]}
+        - Cached tokens used: #{@data[:cached_tokens]}
+        - Cached token percentage: #{((@data[:cached_tokens].to_f / @data[:prompt_tokens]) * 100).round 2}%
+      STRING
       io_stream.puts "Elapsed time: #{((Time.now - START_TIME) / 60).round 1} minutes." # Print script run duration
       io_stream.puts "Words by chapter:\n"
       @data[:word_counts].each_with_index { |chapter_words, i| io_stream.puts "Chapter #{i + 1}: #{chapter_words} words" }
+    end
+
+    # Write the finished chapters to the output file
+    def save
+      abort 'Error: no content to write.' if @chapters.empty?
+      @chapters.each_with_index do |chapter, i|
+        puts "Writing chapter #{i + 1} to file..."
+        @output_file.puts "#{chapter}\n"
+      end
+      puts "Successfully wrote #{@chapters.count} chapters to file: #{::File.path @output_file}"
     end
 
     # Generate one or more chapters of the book
@@ -145,7 +160,7 @@ OUTLINE
       # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
       case @mode
         when 1
-          puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapters long.\n"
+          puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
           puts 'Sending initial prompt, and GPT instructions...'
 
           # Send ChatGPT the book outline for future reference, and provide it with a specific instruction set
@@ -154,8 +169,8 @@ OUTLINE
             parameters: {
               model: GPTK::AI::CONFIG[:openai_gpt_model],
               messages: [
-                { role: 'system', content: @instructions },
-                { role: 'user', content: prompt }
+                { role: 'system', content: @instructions.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') },
+                { role: 'user', content: prompt.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') }
               ],
               temperature: GPTK::AI::CONFIG[:openai_temperature]
             }
@@ -165,25 +180,23 @@ OUTLINE
           @chapters << generate_chapter(CONFIG[:prompt], 1)
 
           # Generate the rest of the chapters
-          if CONFIG[:num_chapters].to_i > 1
-            (CONFIG[:num_chapters].to_i - 1).times do |chapter_number|
-              @chapters << generate_chapter(CONFIG[:prompt], chapter_number + 2)
+          if number_of_chapters.to_i > 1
+            (2..number_of_chapters.to_i).each do |chapter_number|
+              @chapters << generate_chapter(CONFIG[:prompt], chapter_number)
             end
           end
 
-          # Write the finished chapters to the output file
-          abort 'Error: no content to write.' if @chapters.empty?
-          @chapters.each_with_index do |chapter, i|
-            puts "Writing chapter #{i} to file..."
-            @output_file.puts "#{chapter}\n"
-          end
+          # Cache result of last operation
+          @last_output = @chapters
 
           # Output useful metadata
           output_run_info
           output_run_info @output_file
+
+          @chapters
         when 2
         when 3
-        else abort 'Please input a valid script run mode.'
+        else puts 'Please input a valid script run mode.'
       end
     end
   end

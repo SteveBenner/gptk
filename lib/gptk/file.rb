@@ -1,5 +1,6 @@
 module GPTK
   module File
+    # todo: account for missing directory
     # Increment a filename programmatically
     def self.fname_increment(filename)
       if !::File.exist? filename
