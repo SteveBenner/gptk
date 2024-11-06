@@ -15,11 +15,11 @@ module GPTK
       @client = api_client # Platform-agnostic API connection object (for now just supports OpenAI)
       # Reference document for book generation
       @outline = <<~OUTLINE_STR
-OUTLINE
-
-#{::File.exist?(outline) ? ::File.read(outline) : outline}
-
-OUTLINE
+        OUTLINE
+        
+        #{::File.exist?(outline) ? ::File.read(outline) : outline}
+        
+        OUTLINE
       OUTLINE_STR
       @outline = @outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
       @instructions = ::File.exist?(instructions) ? ::File.read(instructions) : instructions
@@ -58,7 +58,7 @@ OUTLINE
       puts "Generating chapter #{chapter_number}...\n"
       chapter, chapter_summary = '', ''
 
-      # Create the chapter chunk by chunk, referencing previous chapter content within the loop
+      # Create the chapter chunk by chunk
       (1..GPTK::Book::CONFIG[:chapter_fragments]).each do |i|
         puts "Generating fragment #{i}..."
         prompt = build_prompt general_prompt, chapter_number, chapter_summary
