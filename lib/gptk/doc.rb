@@ -41,6 +41,7 @@ module GPTK
     end
 
     # Save the current document content to file
+    # todo: add metadata to filename, such as date
     def save
       unless @content || @last_output
         puts 'Error: no document content or last operation results found!'

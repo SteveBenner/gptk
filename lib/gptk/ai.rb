@@ -1,5 +1,7 @@
 module GPTK
   module AI
+    # todo: talk to claude
+    #
     @last_output = nil # Track the cached output of the latest operation
     def self.last_output
       @last_output
