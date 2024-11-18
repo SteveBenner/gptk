@@ -1,5 +1,4 @@
 module GPTK
-  # todo: handle cases where no 'instructions' file or content is present
   # todo: ensure continuity between chapter fragments (might have to do using prompts)
   class Book
     @@start_time = Time.now
@@ -8,26 +7,23 @@ module GPTK
 
     def initialize(api_client,
                    outline,
-                   instructions='',
-                   output_filename='',
-                   rec_prompt='',
-                   parsers=CONFIG[:parsers],
-                   mode=GPTK.mode)
+                   instructions: '',
+                   output_file: '',
+                   rec_prompt: '',
+                   parsers: CONFIG[:parsers],
+                   mode: GPTK.mode)
       @client = api_client # Platform-agnostic API connection object (for now just supports OpenAI)
       # Reference document for book generation
-      @outline = <<~OUTLINE_STR
-        OUTLINE
-        
-        #{::File.exist?(outline) ? ::File.read(outline) : outline}
-        
-        OUTLINE
-      OUTLINE_STR
-      @outline = @outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
-      @instructions = ::File.exist?(instructions) ? ::File.read(instructions) : instructions
-      @output_file = ::File.expand_path output_filename
+      outline = ::File.exist?(outline) ? ::File.read(outline) : outline
+      @outline = outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
+      # Instructions for the AI agent
+      instructions = ::File.exist?(instructions) ? ::File.read(instructions) : instructions
+      @instructions = instructions.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
+      @output_file = ::File.expand_path output_file
       @parsers = parsers
       @mode = mode
       @rec_prompt = ::File.exist?(rec_prompt) ? ::File.read(rec_prompt) : rec_prompt
+      @genre = ''
       @chapters = [] # Book content
       @data = { # Data points to track while generating a book chapter by chapter
         prompt_tokens: 0,
@@ -36,59 +32,71 @@ module GPTK
         word_counts: [],
         current_chapter: 1
       }
-      @genre = ''
     end
 
-    # Construct a prompt based on the outline, previous ch~apter summary, and current chapter summary
-    def build_prompt(prompt, chapter_number)
-      meta_prompt = "Current chapter: #{chapter_number}.\n"
-      generation_prompt = (chapter_number == 1) ? CONFIG[:initial_prompt] : CONFIG[:continue_prompt]
-      [@outline, meta_prompt, generation_prompt, prompt, CONFIG[:post_prompt], CONFIG[:command_code]].join ' '
+    # Construct the prompt passed to the AI agent
+    def build_prompt(prompt, fragment_number)
+      # meta_prompt = "Current chapter: #{chapter_number}.\n"
+      generation_prompt = (fragment_number == 1) ? CONFIG[:initial_prompt] : CONFIG[:continue_prompt]
+      [generation_prompt, prompt].join ' '
     end
 
-    # Generate one complete chapter of the book using the given prompt, for the given CLIENT
-    def generate_chapter(general_prompt, chapter_number, fragments=nil, recommendations_prompt=nil)
-      puts "Generating chapter #{chapter_number}...\n"
-      chapter, chapter_summary = '', ''
+    # Generate one complete chapter of the book using the given prompt
+    def generate_chapter(general_prompt, chapter_number, thread, assistant_id=nil, fragments=nil, recommendations_prompt=nil)
+      # puts "Generating chapter #{chapter_number}...\n"
+      # chapter = ''
 
-      # Generate the chapter based upon presence of `fragments` parameter
-      if fragments # Create the chapter chunk by chunk
-        (1..GPTK::Book::CONFIG[:chapter_fragments]).each do |i|
-          puts "Generating fragment #{i}..."
-          prompt = build_prompt general_prompt, chapter_number
+      messages = []
 
-          # Send the prompt to ChatGPT using the chat API, and retrieve the response
-          response = GPTK::AI.query @client, prompt, @data
+      (1..GPTK::Book::CONFIG[:chapter_fragments]).each do |i|
+        prompt = build_prompt general_prompt, i
+        @client.messages.create(
+          thread_id: thread,
+          parameters: { role: 'user', content: prompt }
+        )
 
-          # Parse the received content using specified parsing components
-          content = parse_response response, @parsers
-          abort 'Error: failed to generate a viable chapter fragment!' unless content
+        # Create the run
+        response = @client.runs.create(
+          thread_id: thread,
+          parameters: { assistant_id: assistant_id }
+        )
+        run_id = response['id']
 
-          # Compose the chapter fragment by fragment
-          chapter << content[:chapter_fragment] + ' '
+        # Loop while awaiting status of the run
+        while true do
+          response = client.runs.retrieve id: run_id, thread_id: thread
+          status = response['status']
+
+          case status
+          when 'queued', 'in_progress', 'cancelling'
+            puts 'Processing...'
+            sleep 1 # Wait one second and poll again
+          when 'completed'
+            messages = @client.messages.list thread_id: thread, parameters: { order: 'asc' }
+            break # Exit loop and report result to user
+          when 'requires_action'
+            # Handle tool calls (see below)
+          when 'cancelled', 'failed', 'expired'
+            puts response['last_error'].inspect
+            break
+          else
+            puts "Unknown status response: #{status}"
+          end
         end
-      else # Create a chapter in one go
-        prompt = build_prompt general_prompt, chapter_number
 
-        # Send the prompt to ChatGPT using the chat API, and retrieve the response
-        response = GPTK::AI.query @client, prompt, @data
-
-        # Parse the received content using specified parsing components
-        content = parse_response response, @parsers
-        abort 'Error: failed to generate a viable chapter!' unless content
-
-        chapter = content[:chapter_fragment] + ' '
+        puts messages['data'].last['content'].first['text']['value']
       end
 
-      @data[:current_chapter] += 1 # For data tracking purposes
+      # @data[:current_chapter] += 1 # For data tracking purposes
 
-      # Revise chapter if 'recommendations_prompt' text or file are given
-      chapter = revise_chapter(chapter, recommendations_prompt) if recommendations_prompt
+      # # Revise chapter if 'recommendations_prompt' text or file are given
+      # chapter = revise_chapter(chapter, recommendations_prompt) if recommendations_prompt
 
       # Count and tally the total number of words generated for each chapter
-      @data[:word_counts] << GPTK::Text.word_count(chapter)
+      # @data[:word_counts] << GPTK::Text.word_count(chapter)
 
-      chapter # Return the generated chapter
+      # chapter # Return the generated chapter
+      messages
     end
 
     # Revise the chapter based upon a set of specific guidelines, using ChatGPT
@@ -99,8 +107,8 @@ module GPTK
       GPTK::AI.query @client, revision_prompt, @data
     end
 
-    # Parse a ChatGPT response text into the chapter content and the 'command code'
-    # Note: due to the tendency of ChatGPT to produce variance in output, significant
+    # Parse an AI model response text into the chapter content and chapter summary
+    # Note: due to the tendency of current AI models to produce hallucinations in output, significant
     # reformatting of the output is required to ensure consistency
     def parse_response(text, parsers=nil)
       # Split the response based on the chapter fragment and the summary (requires Unicode support!)
@@ -115,13 +123,13 @@ module GPTK
       if parsers
         # Fix all the chapter titles (the default output suffers from multiple issues)
         parsers.each do |parser|
-          case @parsers[parser[0][1]].class # Pass each case to String#gsub!
+          case parsers[parser[0][1]].class # Pass each case to String#gsub!
           # Search expression, and replacement string
-          when String then fragment.gsub! @parsers[parser][1][0], @parsers[parser][0][1]
+          when String then fragment.gsub! parsers[parser][1][0], parsers[parser][0][1]
           # Proc to run against the current fragment
-          when Proc   then fragment.gsub! @parsers[parser][1][0], @parsers[parser][0][1]
+          when Proc   then fragment.gsub! parsers[parser][1][0], parsers[parser][0][1]
           # Search expression to delete from output
-          when nil    then fragment.gsub! @parsers[parser][1], ''
+          when nil    then fragment.gsub! parsers[parser][1], ''
           else puts "Parser: '#{parser[0][1]}' is invalid. Use a String, a Proc, or nil."
           end
         end
@@ -181,38 +189,45 @@ module GPTK
           puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
           puts 'Sending initial prompt, and GPT instructions...'
 
-          # Send ChatGPT the book outline for future reference, and provide it with a specific instruction set
-          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book.\n#{@outline}"
-          @client.chat(
-            parameters: {
-              model: GPTK::AI::CONFIG[:openai_gpt_model],
-              messages: [
-                { role: 'system', content: @instructions.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') },
-                { role: 'user', content: prompt.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') }
-              ],
-              temperature: GPTK::AI::CONFIG[:openai_temperature]
-            }
+          # Create the Assistant if it does not exist already
+          assistant_id = if @client.assistants.list['data'].empty?
+            response = @client.assistants.create(
+              parameters: {
+                model: GPTK::AI::CONFIG[:openai_gpt_model],
+                name: 'AI Book generator',
+                description: nil,
+                instructions: @instructions
+              }
+            )
+            response['id']
+                         else
+                           @client.assistants.list['data'].first['id']
+                         end
+
+          # Create the Thread
+          response = @client.threads.create
+          thread_id = response['id']
+
+          # Send the AI the book outline for future reference
+          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
+          @client.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
           )
 
-          # Generate the first chapter
-          @chapters << generate_chapter(CONFIG[:prompt], 1)
-
-          # Generate the rest of the chapters
-          if number_of_chapters.to_i > 1
-            (2..number_of_chapters.to_i).each do |chapter_number|
-              @chapters << generate_chapter(CONFIG[:prompt], chapter_number)
-            end
-          end
+          # Generate as many chapters as are specified
+          prompt = "Generate a fragment of chapter 1 of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content."
+          messages = generate_chapter prompt, 1, thread_id, assistant_id
 
           # Cache result of last operation
-          @last_output = @chapters
+          @last_output = messages
 
           # Output useful metadata
-          output_run_info
-          output_run_info @output_file
+          # output_run_info
+          # output_run_info @output_file
           @@start_time = Time.now
 
-          @chapters
+          response
         when 2
         when 3
         else puts 'Please input a valid script run mode.'

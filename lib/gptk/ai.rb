@@ -1,7 +1,5 @@
 module GPTK
   module AI
-    # todo: talk to claude
-    #
     @last_output = nil # Track the cached output of the latest operation
     def self.last_output
       @last_output
@@ -25,6 +23,7 @@ module GPTK
       # Return the AI's response message
       response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
     end
+
 
     # Query a an AI for categorization of each and every item in a given set
     # @param [GPTK::Doc] doc
