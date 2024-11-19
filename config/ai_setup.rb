@@ -11,7 +11,15 @@ module GPTK
       openai_gpt_model: 'gpt-4o-mini'.freeze,
       openai_temperature: 0.7, # Less = more precise, less creative; more = more expansive & creative
       openai_max_tokens: 8192, # GTP-4 max output tokens per request,
-      batch_ping_interval: 60 # How long in seconds to wait before checking on the status of a Batch
+      batch_ping_interval: 60, # How long in seconds to wait before checking on the status of a Batch
+      # Available Anthropic API models:
+      # - claude-3-5-sonnet-latest
+      # - claude-3-5-haiku-latest
+      # - claude-3-opus-latest
+      # - claude-3-sonnet-20240229
+      # - claude-3-haiku-20240307
+      anthropic_gpt_model: 'claude-3-5-haiku-latest'.freeze,
+      anthropic_max_tokens: 1024
     }
   end
 end

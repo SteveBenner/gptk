@@ -3,7 +3,7 @@ module GPTK
     attr_reader :last_output, :data
     attr_accessor :client, :output_file, :content
 
-    def initialize(api_client, output_file=nil, content=nil, mode=GPTK::MODE)
+    def initialize(api_client, output_file=nil, content=nil, mode=GPTK.mode)
       abort 'Error: invalid client!' unless api_client
       @client = api_client
       @output_file = output_file || ''

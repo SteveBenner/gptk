@@ -6,24 +6,44 @@ module GPTK
     end
 
     # Run a single AI API query (generic) and return the results of a single prompt
-    def self.query(client, prompt, data)
-      response = client.chat(
-        parameters: {
-          model: CONFIG[:openai_gpt_model],
-          messages: [{ role: 'user', content: prompt }],
-          temperature: CONFIG[:openai_temperature],
-          max_tokens: CONFIG[:max_tokens]
-        }
-      )
+    def self.query(client, data, params)
+      method = client.class == OpenAI::Client ? :chat : :messages
+      response = client.send method, parameters: params
       # Count token usage
-      data[:prompt_tokens] += response.dig 'usage', 'prompt_tokens'
-      data[:completion_tokens] += response.dig 'usage', 'completion_tokens'
-      data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
-      puts response # todo: remove for production
+      if data
+        data[:prompt_tokens] += response.dig 'usage', 'prompt_tokens'
+        data[:completion_tokens] += response.dig 'usage', 'completion_tokens'
+        data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
+      end
+      # puts response # todo: remove for production
       # Return the AI's response message
-      response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
+      if client.class == OpenAI::Client
+        response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
+      else
+        response.dig 'content', 0, 'text'
+      end
     end
 
+    module ChatGPT
+      def self.query(client, prompt, data)
+        AI.query client, data, {
+          model: CONFIG[:openai_gpt_model],
+          temperature: CONFIG[:openai_temperature],
+          max_tokens: CONFIG[:max_tokens],
+          messages: [{ role: 'user', content: prompt }]
+        }
+      end
+    end
+
+    module Claude
+      def self.query(client, prompt, data)
+        AI.query client, nil, {
+          model: CONFIG[:anthropic_gpt_model],
+          max_tokens: CONFIG[:anthropic_max_tokens],
+          messages: [{ role: 'user', content: prompt }]
+        }
+      end
+    end
 
     # Query a an AI for categorization of each and every item in a given set
     # @param [GPTK::Doc] doc
@@ -39,7 +59,7 @@ module GPTK
         prompt = "Based on the following categories:\n\n#{categories}\n\nPlease categorize the following prompt:\n\n#{item}\n\nPlease return JUST the category number, and no other output text."
         # Send the prompt to the AI using the chat API, and retrieve the response
         begin
-          content = query doc.client, prompt, doc.data
+          content = ChatGPT.query doc.client, prompt, doc.data
         rescue => e
           puts "Error: #{e.class}: #{e.message}"
           puts 'Please try operation again, or review the code.'
