@@ -18,7 +18,7 @@ module GPTK
       # - claude-3-opus-latest
       # - claude-3-sonnet-20240229
       # - claude-3-haiku-20240307
-      anthropic_gpt_model: 'claude-3-5-haiku-latest'.freeze,
+      anthropic_gpt_model: 'claude-3-5-sonnet-latest'.freeze,
       anthropic_max_tokens: 1024
     }
   end

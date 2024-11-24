@@ -1,5 +1,4 @@
 module GPTK
-  # todo: ensure continuity between chapter fragments (might have to do using prompts)
   class Book
     @@start_time = Time.now
     attr_reader :chapters, :client, :last_output
@@ -64,7 +63,7 @@ module GPTK
 
         # Loop while awaiting status of the run
         while true do
-          response = client.runs.retrieve id: run_id, thread_id: thread
+          response = @client.runs.retrieve id: run_id, thread_id: thread
           status = response['status']
 
           case status

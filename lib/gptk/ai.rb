@@ -7,19 +7,21 @@ module GPTK
 
     # Run a single AI API query (generic) and return the results of a single prompt
     def self.query(client, data, params)
-      method = client.class == OpenAI::Client ? :chat : :messages
-      response = client.send method, parameters: params
+      response = if client.class == OpenAI::Client
+                   client.chat parameters: params
+      else # Anthropic Claude
+        client.messages.create params
+      end
       # Count token usage
       if data
         data[:prompt_tokens] += response.dig 'usage', 'prompt_tokens'
         data[:completion_tokens] += response.dig 'usage', 'completion_tokens'
         data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
       end
-      # puts response # todo: remove for production
-      # Return the AI's response message
+      # Return the AI's response message (object deconstruction must be ABSOLUTELY precise!)
       if client.class == OpenAI::Client
-        response.dig 'choices', 0, 'message', 'content' # This must be ABSOLUTELY precise!
-      else
+        response.dig 'choices', 0, 'message', 'content'
+      else # Anthropic Claude
         response.dig 'content', 0, 'text'
       end
     end
@@ -33,15 +35,109 @@ module GPTK
           messages: [{ role: 'user', content: prompt }]
         }
       end
+
+      def self.create_assistant(client, name, instructions, description=nil, tools=nil, tool_resources=nil, metadata=nil)
+        parameters = {
+          model: CONFIG[:openai_gpt_model],
+          name: name,
+          description: description,
+          instructions: instructions
+        }
+        parameters.update({tools: tools}) if tools
+        parameters.update({tool_resources: tool_resources}) if tool_resources
+        parameters.update({metadata: metadata}) if metadata
+        response = client.assistants.create parameters: parameters
+        response['id']
+      end
+
+      def self.run_assistant_thread(client, thread_id, assistant_id, prompts)
+        abort 'Error: no prompts given!' if prompts.empty?
+        # Populate the thread with messages using given prompts
+        if prompts.class == String
+          client.messages.create thread_id: thread_id, parameters: { role: 'user', content: prompts }
+        else # Array
+          prompts.each do |prompt|
+            client.messages.create thread_id: thread_id, parameters: { role: 'user', content: prompt }
+          end
+        end
+
+        # Create a run using given thread
+        response = client.runs.create thread_id: thread_id, parameters: { assistant_id: assistant_id }
+        run_id = response['id']
+
+        # Loop while awaiting status of the run
+        while true do
+          response = client.runs.retrieve id: run_id, thread_id: thread_id
+          status = response['status']
+
+          case status
+          when 'queued', 'in_progress', 'cancelling'
+            puts 'Processing...'
+            sleep 1
+          when 'completed'
+            messages = client.messages.list thread_id: thread_id, parameters: { order: 'desc', limit: 100 }
+            break
+          when 'requires_action'
+            puts 'Error: unhandled "Requires Action"'
+          when 'cancelled', 'failed', 'expired'
+            puts response['last_error'].inspect
+            break
+          else
+            puts "Unknown status response: #{status}"
+          end
+        end
+
+        ap messages
+        # Return the response text received from the Assistant after processing the run
+        response = messages['data'].last.dig 'content', 0, 'text', 'value'
+        ap "PROMPT(S):\n\n#{prompts}"
+        puts "RESPONSE: #{response}"
+        bad_response = (prompts.class == String) ? (response == prompts) : (prompts.include? response)
+        while bad_response
+          puts 'Error: echoed response detected from ChatGPT. Retrying...'
+          sleep 3
+          self.run_assistant_thread client, thread_id, assistant_id, 'Avoid repeating the input. Turn over to Claude.'
+        end
+        return '' if bad_response
+        sleep 1 # Important to avoid race conditions!
+        response
+      end
     end
 
     module Claude
-      def self.query(client, prompt, data)
-        AI.query client, nil, {
-          model: CONFIG[:anthropic_gpt_model],
-          max_tokens: CONFIG[:anthropic_max_tokens],
-          messages: [{ role: 'user', content: prompt }]
+      def self.query(api_key, messages: nil)
+        # Anthropic manual HTTP setup
+        headers = {
+          'x-api-key' => api_key,
+          'anthropic-version' => '2023-06-01',
+          'content-type' => 'application/json',
+          'anthropic-beta' => 'prompt-caching-2024-07-31'
         }
+        body = {
+          'model': CONFIG[:anthropic_gpt_model],
+          'max_tokens': CONFIG[:anthropic_max_tokens],
+          'messages': messages
+        }
+        response = HTTParty.post(
+          'https://api.anthropic.com/v1/messages',
+          headers: headers,
+          body: body.to_json
+        )
+        # todo: track data
+        # Return text content of the Claude API response
+        output = JSON.parse(response.body).dig 'content', 0, 'text'
+        if output.nil?
+          ap JSON.parse response.body
+          abort 'Error: Claude API provided an empty response!'
+        else
+          output
+        end
+        # Typical chat API query (one-off, unused!)
+        # AI.query client, nil, {
+        #   model: CONFIG[:anthropic_gpt_model],
+        #   max_tokens: CONFIG[:anthropic_max_tokens],
+        #   messages: messages ? messages : [{ role: 'user', content: prompt }]
+        # }
       end
     end
 

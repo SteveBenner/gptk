@@ -3,13 +3,13 @@ require 'yaml'
 require 'parallel'
 %w[ai book config doc file text].each do |lib|
   print "Loading module: #{lib.capitalize}... "
-  require_relative "gptk/#{lib}"
+  load "#{__dir__}/gptk/#{lib}.rb"
   puts 'Success!'
 end
 
 module GPTK
-  VERSION = '0.3'
-  @@mode = ARGV[0].to_i # The script run mode is set via CLI argument
+  VERSION = '0.4'
+  @@mode = 1 # The script run mode is set via CLI argument
   def self.mode
     @@mode
   end
@@ -35,7 +35,6 @@ module GPTK
   end
 
   # A helpful quickstart guide for using the library
-  # todo: make an interactive version
   def self.help
     puts 'Welcome to GPTKit! This brief demo will show you how to use the library.'
     puts '-' * 72
