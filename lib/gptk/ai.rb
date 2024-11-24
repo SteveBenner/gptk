@@ -66,37 +66,45 @@ module GPTK
         run_id = response['id']
 
         # Loop while awaiting status of the run
+        messages = []
         while true do
           response = client.runs.retrieve id: run_id, thread_id: thread_id
           status = response['status']
 
           case status
-          when 'queued', 'in_progress', 'cancelling'
-            puts 'Processing...'
-            sleep 1
-          when 'completed'
-            messages = client.messages.list thread_id: thread_id, parameters: { order: 'desc', limit: 100 }
-            break
-          when 'requires_action'
-            puts 'Error: unhandled "Requires Action"'
-          when 'cancelled', 'failed', 'expired'
-            puts response['last_error'].inspect
-            break
-          else
-            puts "Unknown status response: #{status}"
+            when 'queued', 'in_progress', 'cancelling'
+              puts 'Processing...'
+              sleep 1
+            when 'completed'
+              order, limit = 'asc', 100
+              initial_response = client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
+              messages.concat initial_response['data']
+              if initial_response['has_more'] == true
+                until ['has_more'] == false
+                  messages.concat client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
+                end
+              end
+              break
+            when 'requires_action'
+              puts 'Error: unhandled "Requires Action"'
+            when 'cancelled', 'failed', 'expired'
+              puts response['last_error'].inspect
+              break
+            else puts "Unknown status response: #{status}"
           end
         end
 
         ap messages
         # Return the response text received from the Assistant after processing the run
-        response = messages['data'].last.dig 'content', 0, 'text', 'value'
-        ap "PROMPT(S):\n\n#{prompts}"
+        response = messages.last['content'].first['text']['value']
+        puts 'PROMPT(S)'
+        ap prompts
         puts "RESPONSE: #{response}"
         bad_response = (prompts.class == String) ? (response == prompts) : (prompts.include? response)
         while bad_response
           puts 'Error: echoed response detected from ChatGPT. Retrying...'
           sleep 3
-          self.run_assistant_thread client, thread_id, assistant_id, 'Avoid repeating the input. Turn over to Claude.'
+          response = self.run_assistant_thread client, thread_id, assistant_id, 'Avoid repeating the input. Turn over to Claude.'
         end
         return '' if bad_response
         sleep 1 # Important to avoid race conditions!
