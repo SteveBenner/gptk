@@ -79,11 +79,12 @@ module GPTK
               order, limit = 'asc', 100
               initial_response = client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
               messages.concat initial_response['data']
-              if initial_response['has_more'] == true
-                until ['has_more'] == false
-                  messages.concat client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
-                end
-              end
+              # todo: FINISH THIS SHIT
+              # if initial_response['has_more'] == true
+              #   until ['has_more'] == false
+              #     messages.concat client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
+              #   end
+              # end
               break
             when 'requires_action'
               puts 'Error: unhandled "Requires Action"'
@@ -94,7 +95,7 @@ module GPTK
           end
         end
 
-        ap messages
+        # ap messages
         # Return the response text received from the Assistant after processing the run
         response = messages.last['content'].first['text']['value']
         puts 'PROMPT(S)'
@@ -107,7 +108,7 @@ module GPTK
           response = self.run_assistant_thread client, thread_id, assistant_id, 'Avoid repeating the input. Turn over to Claude.'
         end
         return '' if bad_response
-        sleep 1 # Important to avoid race conditions!
+        sleep 1 # Important to avoid race conditions and token throttling!
         response
       end
     end
@@ -133,10 +134,11 @@ module GPTK
         )
         # todo: track data
         # Return text content of the Claude API response
+        sleep 60 # Important to avoid race conditions and token throttling!
         output = JSON.parse(response.body).dig 'content', 0, 'text'
         if output.nil?
           ap JSON.parse response.body
-          abort 'Error: Claude API provided an empty response!'
+          puts 'Error: Claude API provided an empty response!'
         else
           output
         end
@@ -176,7 +178,7 @@ module GPTK
         i += 1
         content.to_i
       end
-      abort 'Error: no output!' unless results && !results.empty?
+      puts 'Error: no output!' unless results && !results.empty?
       puts "Successfully categorized #{results.values.reduce(0) {|j, loe| j += loe.count; j }} items!"
       @last_output = results # Cache results of the complete operation
       results
