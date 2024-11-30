@@ -8,8 +8,8 @@ require 'parallel'
 end
 
 module GPTK
-  VERSION = '0.4'
-  @@mode = 1 # The script run mode is set via CLI argument
+  VERSION = '0.5'
+  @@mode = ARGV[0] # The script run mode is set via CLI argument
   def self.mode
     @@mode
   end
@@ -17,7 +17,8 @@ module GPTK
     @@mode = value
   end
 
-  if @@mode && !@@mode.zero?
+  @@mode = @@mode == 0 ? 1 : @@mode # Default to mode 1
+  if @@mode
     abort 'Please provide a valid script mode as an argument (1, 2, or 3)' unless [1, 2, 3].include? @@mode
   end
 

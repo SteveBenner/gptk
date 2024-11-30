@@ -79,7 +79,7 @@ module GPTK
               order, limit = 'asc', 100
               initial_response = client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
               messages.concat initial_response['data']
-              # todo: FINISH THIS SHIT
+              # todo: FINISH THIS
               # if initial_response['has_more'] == true
               #   until ['has_more'] == false
               #     messages.concat client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
@@ -95,16 +95,15 @@ module GPTK
           end
         end
 
-        # ap messages
         # Return the response text received from the Assistant after processing the run
         response = messages.last['content'].first['text']['value']
-        puts 'PROMPT(S)'
+        puts 'CHATGPT PROMPT(s)'
         ap prompts
-        puts "RESPONSE: #{response}"
+        puts "CHATGPT RESPONSE: #{response}"
         bad_response = (prompts.class == String) ? (response == prompts) : (prompts.include? response)
         while bad_response
           puts 'Error: echoed response detected from ChatGPT. Retrying...'
-          sleep 3
+          sleep 10
           response = self.run_assistant_thread client, thread_id, assistant_id, 'Avoid repeating the input. Turn over to Claude.'
         end
         return '' if bad_response
@@ -114,7 +113,15 @@ module GPTK
     end
 
     module Claude
-      def self.query(api_key, messages: nil)
+      def self.query(client, prompt: nil, messages: nil)
+        AI.query client, nil, {
+          model: CONFIG[:anthropic_gpt_model],
+          max_tokens: CONFIG[:anthropic_max_tokens],
+          messages: messages ? messages : [{ role: 'user', content: prompt }]
+        }
+      end
+
+      def self.query_with_memory(api_key, messages)
         # Anthropic manual HTTP setup
         headers = {
           'x-api-key' => api_key,
@@ -140,14 +147,9 @@ module GPTK
           ap JSON.parse response.body
           puts 'Error: Claude API provided an empty response!'
         else
+          puts "CLAUDE RESPONSE: #{output}"
           output
         end
-        # Typical chat API query (one-off, unused!)
-        # AI.query client, nil, {
-        #   model: CONFIG[:anthropic_gpt_model],
-        #   max_tokens: CONFIG[:anthropic_max_tokens],
-        #   messages: messages ? messages : [{ role: 'user', content: prompt }]
-        # }
       end
     end
 
