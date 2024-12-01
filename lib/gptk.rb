@@ -28,7 +28,7 @@ module GPTK
   puts 'Successfully configured GPTKit.'
   puts "If you don't know where to begin, type `GPTK.help` to get started!"
 
-  puts 'WARNING: Operating without script mode!' if @@mode.zero?
+  puts 'WARNING: Operating without script mode!' if @@mode == 0
 
   # Benchmarking method to calculate elapsed time
   def self.elapsed_time

@@ -53,7 +53,7 @@ module GPTK
       puts "Revising chapter..."
       revision_prompt = "Please revise the following chapter content:\n\n" + chapter + "\n\nREVISIONS:\n" +
         recommendations_prompt + "\nDo NOT change the chapter title or number--this must remain the same as the original, and must accurately reflect the outline."
-      GPTK::AI.query @clients.first, revision_prompt, @data
+      GPTK::AI.query @chatgpt_client, revision_prompt, @data
     end
 
     # Parse an AI model response text into the chapter content and chapter summary
@@ -178,7 +178,7 @@ module GPTK
     def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = '')
       # Initialize claude memory every time we run a chapter generation operation
       # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
-      claude_memory = { role: 'user', content: [{ type: 'text', text: @outline, cache_control: { type: 'ephemeral' } }] }
+      claude_memory = { role: 'user', content: [{ type: 'text', text: "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE", cache_control: { type: 'ephemeral' } }] }
 
       unless prev_chapter.empty? # Add any previously generated chapter to the memory of the proper AI
         if parity == 0 # ChatGPT
@@ -203,7 +203,6 @@ module GPTK
                      fragment = GPTK::AI::ChatGPT.run_assistant_thread CHATGPT, thread_id, assistant_id, chapter_gen_prompt
                      claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment}"
                      "\n\n#{fragment}"
-                     " #{fragment}"
                    else # Claude
                      parity = 0
                      prompt_messages = [claude_memory, { role: 'user', content: chapter_gen_prompt }]
@@ -211,7 +210,6 @@ module GPTK
                      claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment}"
                      CHATGPT.messages.create thread_id: thread_id, parameters: { role: 'user', content: fragment }
                      "\n\n#{fragment}"
-                     " #{fragment}"
                    end
       end
 
@@ -277,66 +275,59 @@ module GPTK
       @@start_time = Time.now
       CONFIG[:num_chapters] = number_of_chapters # Update config
       chapters = []
-      # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
       begin
-        case @mode
-          when 1
-            puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
-            puts 'Sending initial prompt, and GPT instructions...'
+        puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
+        puts 'Sending initial prompt, and GPT instructions...'
 
-            prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
+        prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
 
-            if @chatgpt_client
-              # Create the Assistant if it does not exist already
-              assistant_id = if @chatgpt_client.assistants.list['data'].empty?
-                               response = @chatgpt_client.assistants.create(
-                                 parameters: {
-                                   model: GPTK::AI::CONFIG[:openai_gpt_model],
-                                   name: 'AI Book generator',
-                                   description: nil,
-                                   instructions: @instructions
-                                 }
-                               )
-                               response['id']
-                             else
-                               @chatgpt_client.assistants.list['data'].last['id']
-                             end
-              # Create the Thread
-              response = @chatgpt_client.threads.create
-              thread_id = response['id']
+        if @chatgpt_client
+          # Create the Assistant if it does not exist already
+          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
+                           response = @chatgpt_client.assistants.create(
+                             parameters: {
+                               model: GPTK::AI::CONFIG[:openai_gpt_model],
+                               name: 'AI Book generator',
+                               description: nil,
+                               instructions: @instructions
+                             }
+                           )
+                           response['id']
+                         else
+                           @chatgpt_client.assistants.list['data'].last['id']
+                         end
+          # Create the Thread
+          response = @chatgpt_client.threads.create
+          thread_id = response['id']
 
-              # Send ChatGPT the book outline for future reference
-              @chatgpt_client.messages.create(
-                thread_id: thread_id,
-                parameters: { role: 'user', content: prompt }
-              )
-            end
-
-            claude_memory = {}
-            if @claude_client
-              # Instantiate Claude memory for chapter production conversation
-              # Ensure `claude_messages` is always an Array with ONE element using cache_control type: 'ephemeral'
-              initial_memory = "#{prompt}\n\nINSTRUCTIONS FOR CLAUDE:\n\n#{@instructions}END OF INSTRUCTIONS"
-              claude_memory = { role: 'user', content: [{ type: 'text', text: initial_memory, cache_control: { type: 'ephemeral' } }] }
-            end
-
-            # Generate as many chapters as are specified
-            parity = 0
-            prev_chapter = ''
-            (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
-              chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
-              parity = parity == 0 ? 1 : 0
-              prev_chapter = chapter
-              @last_output = chapter # Cache results of the last operation
-              chapters << chapter
-            end
-
-            @last_output = chapters # Cache results of the last operation
-            chapters # Return the generated story chapters
-          when 2
-          when 3
-          else puts 'Please input a valid script run mode.'
+          # Send ChatGPT the book outline for future reference
+          @chatgpt_client.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
+          )
         end
+
+        claude_memory = {}
+        if @claude_client
+          # Instantiate Claude memory for chapter production conversation
+          # Ensure `claude_messages` is always an Array with ONE element using cache_control type: 'ephemeral'
+          initial_memory = "#{prompt}\n\nINSTRUCTIONS FOR CLAUDE:\n\n#{@instructions}END OF INSTRUCTIONS"
+          claude_memory = { role: 'user', content: [{ type: 'text', text: initial_memory, cache_control: { type: 'ephemeral' } }] }
+        end
+
+        # Generate as many chapters as are specified
+        parity = 0
+        prev_chapter = ''
+        (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
+          chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
+          parity = parity == 0 ? 1 : 0
+          prev_chapter = chapter
+          @last_output = chapter # Cache results of the last operation
+          chapters << chapter
+        end
+
+        @last_output = chapters # Cache results of the last operation
+        chapters # Return the generated story chapters
       ensure
         CHATGPT.threads.delete id: thread_id # Garbage collection
         # Output some metadata - useful information about the run, API status, book content, etc.

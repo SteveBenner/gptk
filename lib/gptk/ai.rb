@@ -113,6 +113,7 @@ module GPTK
     end
 
     module Claude
+      # This method assumes you MUST pass either a prompt OR a messages array
       def self.query(client, prompt: nil, messages: nil)
         AI.query client, nil, {
           model: CONFIG[:anthropic_gpt_model],
@@ -132,7 +133,7 @@ module GPTK
         body = {
           'model': CONFIG[:anthropic_gpt_model],
           'max_tokens': CONFIG[:anthropic_max_tokens],
-          'messages': messages
+          'messages': messages[:messages]
         }
         response = HTTParty.post(
           'https://api.anthropic.com/v1/messages',
