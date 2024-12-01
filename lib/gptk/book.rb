@@ -175,22 +175,22 @@ module GPTK
     end
 
     # Generate one complete chapter of the book using the zipper technique
-    def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = '')
+    def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = [])
       # Initialize claude memory every time we run a chapter generation operation
       # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
       claude_memory = { role: 'user', content: [{ type: 'text', text: "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE", cache_control: { type: 'ephemeral' } }] }
 
       unless prev_chapter.empty? # Add any previously generated chapter to the memory of the proper AI
         if parity == 0 # ChatGPT
-          CHATGPT.messages.create thread_id: thread_id, parameters: { role: 'user', content: "PREVIOUS CHAPTER:\n\n#{prev_chapter}" }
+          CHATGPT.messages.create thread_id: thread_id, parameters: { role: 'user', content: "PREVIOUS CHAPTER:\n\n#{prev_chapter.join("\n\n")}" }
         else # Claude
-          claude_memory[:content].first[:text] << "\n\nPREVIOUS CHAPTER:\n\n#{prev_chapter}"
+          claude_memory[:content].first[:text] << "\n\nPREVIOUS CHAPTER:\n\n#{prev_chapter.join("\n\n")}"
         end
       end
 
       # Generate the chapter fragment by fragment
       meta_prompt = GPTK::Book::CONFIG[:meta_prompt]
-      chapter = ''
+      chapter = []
       (1..fragments).each do |j|
         # Come up with an initial version of the chapter, based on the outline and prior chapter
         chapter_gen_prompt = case j
@@ -200,23 +200,69 @@ module GPTK
                              end
         chapter << if parity == 0 # ChatGPT
                      parity = 1
-                     fragment = GPTK::AI::ChatGPT.run_assistant_thread CHATGPT, thread_id, assistant_id, chapter_gen_prompt
-                     claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment}"
-                     "\n\n#{fragment}"
+                     fragment_text = GPTK::AI::ChatGPT.run_assistant_thread CHATGPT, thread_id, assistant_id, chapter_gen_prompt
+                     claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment_text}"
+                     fragment_text
                    else # Claude
                      parity = 0
                      prompt_messages = [claude_memory, { role: 'user', content: chapter_gen_prompt }]
-                     fragment = GPTK::AI::Claude.query_with_memory ANTHROPIC_API_KEY, messages: prompt_messages
-                     claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment}"
-                     CHATGPT.messages.create thread_id: thread_id, parameters: { role: 'user', content: fragment }
-                     "\n\n#{fragment}"
+                     fragment_text = GPTK::AI::Claude.query_with_memory ANTHROPIC_API_KEY, messages: prompt_messages
+                     claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment_text}"
+                     CHATGPT.messages.create thread_id: thread_id, parameters: { role: 'user', content: fragment_text }
+                     fragment_text
                    end
       end
+      chapter # Array of Strings representing chapter fragments for one chapter
+    end
 
-      chapter
+    # Revise content using one or more AI agents (NOTE: you MUST pass in the Anthropic API key if using Claude)
+    def revise_chapter(chapter, chatgpt_client: @chatgpt_client, claude_client: @claude_client, anthropic_api_key: nil)
+      @@start_time = Time.now
+      revised_chapter = []
+      chapter_text = chapter.join ' '
+
+      # todo: scan for bad patterns and generate an array to create for the followup revision prompt
+
+      instructions_prompt = "Revise the following chapter fragment based upon these rules: 1) Scan your memory and check the current fragment for presence of the following phrases or words, and rewrite the fragment ONLY allowing ONE total usage of any of the given phrases or words in the list for the current chapter, amongst all the chapter fragments. Here is the list: #{CONFIG[:bad_phrases].join('; ')}. END OF LIST. Refrain from adding conversation to the user in the output; keep it content only."
+
+      begin
+        if chatgpt_client
+          # Create a new Thread
+          thread_id = chatgpt_client.threads.create['id']
+          # ChatGPT setup
+          chatgpt_client.messages.create thread_id: thread_id, parameters: { role: 'user', content: chapter_text }
+        end
+
+        if claude_client
+          # Claude setup
+          claude_memory = { role: 'user', content: [{ type: 'text', text: instructions_prompt, cache_control: { type: 'ephemeral' } }] }
+        end
+
+        # Loop over each chapter fragment, revising each one and returning the results as an array of chapter fragments
+        chapter.each_with_index do |fragment, i|
+          chatgpt_prompt = "#{instructions_prompt}\n\nFRAGMENT:\n\n#{fragment}"
+          revised_fragment = if chatgpt_client # If ChatGPT agent is given OR if additional agents are given as well
+                               GPTK::AI::ChatGPT.query chatgpt_client, @data, chatgpt_prompt
+                             else # Claude
+                               claude_memory[:content].first[:text] << "\n\nFRAGMENT:\n\n#{fragment}"
+                               claude_revision = GPTK::AI::Claude.query_with_memory anthropic_api_key, [claude_memory]
+                               claude_memory[:content].first[:text] << "\n\nFRAGMENT #{i + 1}:\n\n#{claude_revision}"
+                               chatgpt_client.messages.create thread_id: thread_id, parameters: { role: 'user', content: "\n\nFRAGMENT #{i + 1}:\n\n#{claude_revision}"}
+                               claude_revision
+                             end
+          # if claude_client
+          #   # todo: add conversation code
+          # end
+          revised_chapter << revised_fragment
+        end
+      ensure
+        @chatgpt_client.threads.delete thread_id: thread_id # Garbage collection
+      end
+      revised_chapter
     end
 
     # Generate one or more chapters of the book
+    # todo: update for multiple clients
     def generate(number_of_chapters = CONFIG[:num_chapters])
       CONFIG[:num_chapters] = number_of_chapters
       # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
@@ -296,9 +342,9 @@ module GPTK
                          else
                            @chatgpt_client.assistants.list['data'].last['id']
                          end
+
           # Create the Thread
-          response = @chatgpt_client.threads.create
-          thread_id = response['id']
+          thread_id = @chatgpt_client.threads.create['id']
 
           # Send ChatGPT the book outline for future reference
           @chatgpt_client.messages.create(
@@ -317,7 +363,7 @@ module GPTK
 
         # Generate as many chapters as are specified
         parity = 0
-        prev_chapter = ''
+        prev_chapter = []
         (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
           chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
           parity = parity == 0 ? 1 : 0
@@ -329,7 +375,7 @@ module GPTK
         @last_output = chapters # Cache results of the last operation
         chapters # Return the generated story chapters
       ensure
-        CHATGPT.threads.delete id: thread_id # Garbage collection
+        @chatgpt_client.threads.delete id: thread_id # Garbage collection
         # Output some metadata - useful information about the run, API status, book content, etc.
         $chapters = chapters
         $outline = @outline

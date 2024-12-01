@@ -27,13 +27,14 @@ module GPTK
     end
 
     module ChatGPT
-      def self.query(client, prompt, data)
+      def self.query(client, data, prompt)
         AI.query client, data, {
           model: CONFIG[:openai_gpt_model],
           temperature: CONFIG[:openai_temperature],
           max_tokens: CONFIG[:max_tokens],
           messages: [{ role: 'user', content: prompt }]
         }
+        # todo: track token usage
       end
 
       def self.create_assistant(client, name, instructions, description=nil, tools=nil, tool_resources=nil, metadata=nil)
