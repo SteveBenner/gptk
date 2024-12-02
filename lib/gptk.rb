@@ -8,7 +8,7 @@ require 'parallel'
 end
 
 module GPTK
-  VERSION = '0.5.1'
+  VERSION = '0.5.2'
   @@mode = ARGV[0] # The script run mode is set via CLI argument
   def self.mode
     @@mode
