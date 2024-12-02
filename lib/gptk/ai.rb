@@ -9,9 +9,9 @@ module GPTK
     def self.query(client, data, params)
       response = if client.class == OpenAI::Client
                    client.chat parameters: params
-      else # Anthropic Claude
-        client.messages.create params
-      end
+                 else # Anthropic Claude
+                   client.messages.create params
+                 end
       # Count token usage
       if data
         data[:prompt_tokens] += response.dig 'usage', 'prompt_tokens'
@@ -98,9 +98,6 @@ module GPTK
 
         # Return the response text received from the Assistant after processing the run
         response = messages.last['content'].first['text']['value']
-        puts 'CHATGPT PROMPT(s)'
-        ap prompts
-        puts "CHATGPT RESPONSE: #{response}"
         bad_response = (prompts.class == String) ? (response == prompts) : (prompts.include? response)
         while bad_response
           puts 'Error: echoed response detected from ChatGPT. Retrying...'
@@ -115,6 +112,7 @@ module GPTK
 
     module Claude
       # This method assumes you MUST pass either a prompt OR a messages array
+      # todo: FIX THIS METHOD! CURRENTLY RETURNING 400 ERROR
       def self.query(client, prompt: nil, messages: nil, data: nil)
         AI.query client, data, {
           model: CONFIG[:anthropic_gpt_model],
@@ -143,13 +141,12 @@ module GPTK
         )
         # todo: track data
         # Return text content of the Claude API response
-        sleep 60 # Important to avoid race conditions and token throttling!
+        sleep 60 # Important to avoid race conditions and especially token throttling!
         output = JSON.parse(response.body).dig 'content', 0, 'text'
         if output.nil?
           ap JSON.parse response.body
           puts 'Error: Claude API provided an empty response!'
         else
-          puts "CLAUDE RESPONSE: #{output}"
           output
         end
       end

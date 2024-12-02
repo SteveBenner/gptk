@@ -216,16 +216,39 @@ module GPTK
     end
 
     # Revise content using one or more AI agents (NOTE: you MUST pass in the Anthropic API key if using Claude)
+    # todo: apply user-generated revisions
+    #   - pattern by pattern, interact with human!
+    #   - options: change, eliminate, and/or ignore for EACH OCCURRENCE
+    #   - batch mode: offer an option to batch one of the choices for EACH PATTERN
     def revise_chapter1(chapter, chatgpt_client: @chatgpt_client, claude_client: @claude_client, anthropic_api_key: nil)
       @@start_time = Time.now
       revised_chapter, claude_memory = [], {}
       chapter_text = chapter.join ' '
 
-      # todo: apply user-generated revisions
       # Scan for bad patterns and generate an Array of results to later parse out of the book content
-      bad_pattern_prompt = "Scan the following chapter"
+      bad_pattern_prompt = "Scan the following chapter for bad patterns, defined here: (#{CONFIG[:bad_phrases].join('; ')}) and return the results as a Ruby object. ONLY output the object, no other response text or conversation, and do not put it in a Markdown Ruby block. ONLY output JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'word' (a count of how many words from the beginning of the chapter the pattern occurred at).\n\nCHAPTER:\n\n#{chapter}"
+      chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query @chatgpt_client, @data, bad_pattern_prompt)[:matches]
+      ap chatgpt_matches
+      claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
+      ap claude_matches
 
-      instructions_prompt = "Revise the following chapter fragment based upon these rules: 1) Scan your memory and check the current fragment for presence of the following phrases or words, and rewrite the fragment ONLY allowing ONE total usage of any of the given phrases or words in the list for the current chapter, amongst all the chapter fragments. Here is the list: #{CONFIG[:bad_phrases].join('; ')}. END OF LIST. Refrain from adding conversation to the user in the output; keep it content only."
+      # Remove any duplicate matches from Claude's results
+      claude_matches.delete_if do |match|
+        chatgpt_matches.include? {|i| i['match'] == match['match'] && i['word'] == match['word']}
+      end
+
+      bad_patterns = chatgpt_matches.concat claude_matches
+
+
+
+      # todo: parse chatgpt results into grouped matches
+      # todo: parse claude results into grouped matches
+      # todo: interaction 1: batch mode prompt
+      # todo: interaction loop
+
+      return
+
+      instructions_prompt = "Revise the following chapter fragment based upon these rules: 1) Scan your memory and check the current fragment for presence of the following phrases or words, and rewrite the fragment ONLY allowing ONE total usage of any of the given phrases or words in the list for the current chapter, amongst all the chapter fragments, AND expand your analysis to include a 'proximal word cloud' for each bad pattern. Here is the list: #{CONFIG[:bad_phrases].join('; ')}. END OF LIST. Refrain from adding conversation to the user in the output; keep it content only."
 
       begin
         puts 'Revising chapter...'
