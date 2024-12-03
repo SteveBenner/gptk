@@ -7,12 +7,12 @@ module GPTK
       num_chapters: num_chapters,
       chapter_fragments: chapter_fragments,
       chapter_fragment_words: chapter_fragment_words,
-      initial_prompt: 'Generate the first portion of the current chapter of the story.'.freeze,
-      continue_prompt: 'Continue generating the current chapter of the story, starting from where we left off. Do NOT repeat any previously generated material.'.freeze,
-      prompt: "For the chapter title and content, refer EXPLICITLY to the outline, and if included, the prior chapter summary and current chapter summary. Refer to your context for memory of prior content, as well. Chapter title should be an H1 element SPECIFICALLY (# character in markdown) followed by the chapter name. Chapter titles must match those in the outline EXACTLY. Generate AT LEAST #{chapter_fragment_words} words.".freeze,
+      initial_prompt: 'Generate the first portion of the current chapter of the story.',
+      continue_prompt: 'Continue generating the current chapter of the story, starting from where we left off. Do NOT repeat any previously generated material.',
+      prompt: "For the chapter title and content, refer EXPLICITLY to the outline, and if included, the prior chapter summary and current chapter summary. Refer to your context for memory of prior content, as well. Chapter title should be an H1 element SPECIFICALLY (# character in markdown) followed by the chapter name. Chapter titles must match those in the outline EXACTLY. Generate AT LEAST #{chapter_fragment_words} words.",
       post_prompt: 'Make SURE to include the chapter number with the chapter title.',
-      command_code: 'The response should FIRST contain the chapter content, THEN, delineated with 3 dashes (markdown horizontal line), a summary of the current chapter fragment. Delineation of the summary MUST be 3 dashes SPECIFICALLY.'.freeze,
-      meta_prompt: 'Maintain continuity and do NOT repeat any previously generated material. Generate as much content as possible. AVOID commentary to the user; just produce book content. AVOID expose, i.e. "telling" instead of "showing". AVOID explaining what is going on at the end of a fragment/chapter, like "the stage was set" or "the chapter closed". AVOID repeating phrases or elements that have already been used, such as "shivers went down her spine" and "the air was thick with tension". AVOID cliches and trite writing style. AVOID cliches, platitudes, and trite phraseology.'.freeze,
+      command_code: 'The response should FIRST contain the chapter content, THEN, delineated with 3 dashes (markdown horizontal line), a summary of the current chapter fragment. Delineation of the summary MUST be 3 dashes SPECIFICALLY.',
+      meta_prompt: 'Maintain continuity and do NOT repeat any previously generated material. Generate as much content as possible. AVOID commentary to the user; just produce book content. AVOID expose, i.e. "telling" instead of "showing". AVOID explaining what is going on at the end of a fragment/chapter, like "the stage was set" or "the chapter closed". AVOID repeating phrases or elements that have already been used, such as "shivers went down her spine" and "the air was thick with tension". AVOID cliches and trite writing style. AVOID cliches, platitudes, and trite phraseology.',
       bad_phrases: [
         'Mind (raced)',
         'Shiver, spine',
@@ -42,6 +42,6 @@ module GPTK
         remove_extra_newlines_from_start_of_file: [/\n\n(.*)/i, '\1'],
         remove_chapter_conclusion: [/---\n\n.*chapter*[^-]*---/, nil]
       }
-    }
+    }.freeze
   end
 end

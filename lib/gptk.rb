@@ -1,26 +1,21 @@
 require 'json'
 require 'yaml'
 require 'parallel'
-%w[ai book config doc file text].each do |lib|
+%w[ai book config doc file text utils].each do |lib|
   print "Loading module: #{lib.capitalize}... "
   load "#{__dir__}/gptk/#{lib}.rb"
   puts 'Success!'
 end
 
+# GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
-  VERSION = '0.5.2'
-  @@mode = ARGV[0] # The script run mode is set via CLI argument
-  def self.mode
-    @@mode
-  end
-  def self.mode=(value)
-    @@mode = value
-  end
+  VERSION = '0.5.2'.freeze
+  attr_accessor :mode
 
-  @@mode = @@mode == 0 ? 1 : @@mode # Default to mode 1
-  if @@mode
-    abort 'Please provide a valid script mode as an argument (1, 2, or 3)' unless [1, 2, 3].include? @@mode
-  end
+  @mode = ARGV[0] || 0 # The script run mode is set via CLI argument
+
+  @mode = @mode.zero? ? 1 : @mode # Default to mode 1
+  abort 'Please provide a valid script mode as an argument (1, 2, or 3)' if @mode && ![1, 2, 3].include?(@mode)
 
   # Load configuration files
   Config.load_openai_setup
@@ -28,7 +23,7 @@ module GPTK
   puts 'Successfully configured GPTKit.'
   puts "If you don't know where to begin, type `GPTK.help` to get started!"
 
-  puts 'WARNING: Operating without script mode!' if @@mode == 0
+  puts 'WARNING: Operating without script mode!' if @mode.zero?
 
   # Benchmarking method to calculate elapsed time
   def self.elapsed_time
