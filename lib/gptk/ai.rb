@@ -19,13 +19,23 @@ module GPTK
         data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
       end
       # Return the AI's response message (object deconstruction must be ABSOLUTELY precise!)
-      if client.class == OpenAI::Client
-        response.dig 'choices', 0, 'message', 'content'
-      else # Anthropic Claude
-        response.dig 'content', 0, 'text'
+      output = if client.instance_of? OpenAI::Client
+                 response.dig 'choices', 0, 'message', 'content'
+               else # Anthropic Claude
+                 response.dig 'content', 0, 'text'
+               end
+      if output.nil?
+        puts 'Error! Null output received from ChatGPT query.'
+        until output
+          puts 'Retrying...'
+          output = client.chat parameters: params
+          sleep 10
+        end
       end
+      output
     end
 
+    # OpenAI's ChatGPT interface
     module ChatGPT
       def self.query(client, data, prompt)
         AI.query client, data, {
@@ -34,10 +44,10 @@ module GPTK
           max_tokens: CONFIG[:max_tokens],
           messages: [{ role: 'user', content: prompt }]
         }
-        # todo: track token usage
+        # TODO: track token usage
       end
 
-      def self.create_assistant(client, name, instructions, description=nil, tools=nil, tool_resources=nil, metadata=nil)
+      def self.create_assistant(client, name, instructions, description = nil, tools = nil, tool_resources = nil, metadata = nil)
         parameters = {
           model: CONFIG[:openai_gpt_model],
           name: name,
@@ -54,7 +64,7 @@ module GPTK
       def self.run_assistant_thread(client, thread_id, assistant_id, prompts)
         abort 'Error: no prompts given!' if prompts.empty?
         # Populate the thread with messages using given prompts
-        if prompts.class == String
+        if prompts.instance_of? String
           client.messages.create thread_id: thread_id, parameters: { role: 'user', content: prompts }
         else # Array
           prompts.each do |prompt|
@@ -68,48 +78,54 @@ module GPTK
 
         # Loop while awaiting status of the run
         messages = []
-        while true do
+        loop do
           response = client.runs.retrieve id: run_id, thread_id: thread_id
           status = response['status']
 
           case status
-            when 'queued', 'in_progress', 'cancelling'
-              puts 'Processing...'
-              sleep 1
-            when 'completed'
-              order, limit = 'asc', 100
-              initial_response = client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
-              messages.concat initial_response['data']
-              # todo: FINISH THIS
-              # if initial_response['has_more'] == true
-              #   until ['has_more'] == false
-              #     messages.concat client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
-              #   end
-              # end
-              break
-            when 'requires_action'
-              puts 'Error: unhandled "Requires Action"'
-            when 'cancelled', 'failed', 'expired'
-              puts response['last_error'].inspect
-              break
-            else puts "Unknown status response: #{status}"
+          when 'queued', 'in_progress', 'cancelling'
+            puts 'Processing...'
+            sleep 1
+          when 'completed'
+            order = 'asc'
+            limit = 100
+            initial_response = client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
+            messages.concat initial_response['data']
+            # TODO: FINISH THIS (multi-page paging for messages)
+            # if initial_response['has_more'] == true
+            #   until ['has_more'] == false
+            #     messages.concat client.messages.list(thread_id: thread_id, parameters: { order: order, limit: limit })
+            #   end
+            # end
+            break
+          when 'requires_action'
+            puts 'Error: unhandled "Requires Action"'
+          when 'cancelled', 'failed', 'expired'
+            puts response['last_error'].inspect
+            break
+          else
+            puts "Unknown status response: #{status}"
+            break
           end
         end
 
         # Return the response text received from the Assistant after processing the run
         response = messages.last['content'].first['text']['value']
-        bad_response = (prompts.class == String) ? (response == prompts) : (prompts.include? response)
+        bad_response = prompts.instance_of?(String) ? (response == prompts) : (prompts.include? response)
         while bad_response
           puts 'Error: echoed response detected from ChatGPT. Retrying...'
           sleep 10
-          response = self.run_assistant_thread client, thread_id, assistant_id, 'Avoid repeating the input. Turn over to Claude.'
+          response = run_assistant_thread client, thread_id, assistant_id,
+                                          'Avoid repeating the input. Turn over to Claude.'
         end
         return '' if bad_response
+
         sleep 1 # Important to avoid race conditions and token throttling!
         response
       end
     end
 
+    # Anthropic Claude interface
     module Claude
       # This method assumes you MUST pass either a prompt OR a messages array
       # todo: FIX THIS METHOD! CURRENTLY RETURNING 400 ERROR
@@ -117,7 +133,7 @@ module GPTK
         AI.query client, data, {
           model: CONFIG[:anthropic_gpt_model],
           max_tokens: CONFIG[:anthropic_max_tokens],
-          messages: messages ? messages : [{ role: 'user', content: prompt }]
+          messages: messages || [{ role: 'user', content: prompt }]
         }
       end
 
@@ -139,10 +155,16 @@ module GPTK
           headers: headers,
           body: body.to_json
         )
-        # todo: track data
+        # TODO: track data
         # Return text content of the Claude API response
-        sleep 60 # Important to avoid race conditions and especially token throttling!
-        output = JSON.parse(response.body).dig 'content', 0, 'text'
+        sleep 1 # Important to avoid race conditions and especially token throttling!
+        begin
+          output = JSON.parse(response.body).dig 'content', 0, 'text'
+        rescue
+          puts 'Error: JSON parse error detected. Retrying query...'
+          sleep 10
+          output = query_with_memory api_key, messages
+        end
         if output.nil?
           ap JSON.parse response.body
           puts 'Error: Claude API provided an empty response!'
@@ -150,6 +172,16 @@ module GPTK
           output
         end
       end
+    end
+
+    # XAI's Grok
+    module Grok
+
+    end
+
+    # Google's Gemini
+    module Gemini
+
     end
 
     # Query a an AI for categorization of each and every item in a given set
