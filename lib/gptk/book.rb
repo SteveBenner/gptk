@@ -292,13 +292,13 @@ module GPTK
           anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
         )
         ap claude_matches
-        claude_matches = if claude_matches['matches']
-                           claude_matches['matches']
-                         elsif claude_matches['patterns']
-                           claude_matches['patterns']
-                         else
-                           claude_matches
-                         end
+        unless claude_matches.instance_of? Array
+          claude_matches = if claude_matches.key? 'matches'
+                             claude_matches['matches']
+                           elsif claude_matches.key? 'patterns'
+                             claude_matches['patterns']
+                           end
+        end
 
         # Remove any duplicate matches from Claude's results
         duplicates = []
@@ -359,13 +359,13 @@ module GPTK
 
             case choice
             when 1
-              bad_matches.each do |pattern|
-                puts "Pattern: #{pattern[:match]}"
-                puts "Sentence: #{pattern[:sentence]}"
-                puts "Sentence Number: #{pattern[:sentence_count]}"
+              bad_matches.each do |match|
+                puts "Pattern: #{match[:match]}"
+                puts "Sentence: #{match[:sentence]}"
+                puts "Sentence Number: #{match[:sentence_count]}"
                 puts 'Please input your revised sentence.'
                 revised_sentence = gets
-                revised_chapter.gsub! pattern[:sentence], revised_sentence
+                revised_chapter.gsub! match[:sentence], revised_sentence
                 puts 'Revision complete!'
               end
             when 2
@@ -377,7 +377,9 @@ module GPTK
                 claude_revised_sentence = GPTK::AI::Claude.query_with_memory anthropic_api_key,
                                                                              [{ role: 'user', content: prompt }]
                 # Revise the chapter text based on AI feedback
+                # TODO: fix duplicates!
                 puts "Revising sentence #{match[:sentence_count]} using Claude..."
+                puts "Original: #{match[:sentence]}"
                 puts "Revision: #{claude_revised_sentence}"
                 sleep 1
                 revised_chapter.gsub! match[:sentence], claude_revised_sentence
@@ -408,8 +410,7 @@ module GPTK
               puts "Ignoring #{matches.count} matches for pattern '#{pattern}'..."
             when 2
               puts 'Would you like to 1) have ChatGPT perform revisions on all the matches using its own judgement,'
-              puts 'or 2) would you like to provide it a general prompt ChatGPT will use to revise the matches?'
-              puts 'Input an option.'
+              puts 'or 2) would you like to provide a general prompt ChatGPT will use to revise the matches?'
               choice = gets.to_i
               case choice
               when 1 # Have ChatGPT auto-revise content
@@ -423,7 +424,7 @@ module GPTK
                   revised_chapter.gsub! match[:sentence], chatgpt_revised_sentence
                 end
                 puts "Successfully revised #{matches.count} bad pattern occurrences using ChatGPT!"
-              when 2 # Prompt user to specify prompt for ChatGPT
+              when 2 # Prompt user to specify prompt for the ChatGPT
                 puts 'Please enter a prompt to instruct ChatGPT regarding the revision of these bad pattern matches.'
                 user_prompt = gets
                 matches.each do |match|
@@ -446,10 +447,64 @@ module GPTK
               end
               puts "Deleted #{matches.count} bad pattern occurrences!"
             when 4 # Interactively or automagically address each bad pattern match one by one
-              puts ""
-              puts "Reviewing #{matches.count} matches of pattern #{pattern}..."
-              bad_patterns.each do |pattern|
-
+              # TODO: 3 operations per match for using AI - apply change, rewrite, keep
+              puts "Reviewing #{matches.count} matches of pattern: '#{pattern}'..."
+              matches.each do |match|
+                puts "Sentence: #{match[:sentence]}"
+                puts "Sentence Number: #{match[:sentence_count]}"
+                puts 'Would you like to 1) Keep as is, 2) Revise, or 3) Delete?'
+                choice = gets.to_i
+                case choice
+                when 1 then puts 'Original content left unaltered.'
+                when 2
+                  puts 'Would you like to 1) input a revision yourself, or 2) use ChatGPT to generate a revision?'
+                  choice2 = gets.to_i
+                  if choice2 == 1
+                    puts 'Please input your revised sentence:'
+                    user_revision = gets
+                    revised_chapter.gsub! match[:sentence], user_revision
+                  elsif choice2 == 2
+                    puts 'Generating a revision using ChatGPT...'
+                    prompt = <<~STR
+                      Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{match[:match]}'. SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+                    STR
+                    chatgpt_revision = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                    puts "Original sentence: #{match[:sentence]}"
+                    puts "Revised sentence: #{chatgpt_revision}"
+                    puts 'Would you like to 1) Accept this revised sentence, 2) Revise it again, or 3) Keep original?'
+                    choice = gets.to_i
+                    case choice
+                    when 1
+                      puts 'Updating chapter...'
+                      revised_chapter.gsub! match[:sentence], chatgpt_revision
+                    when 2
+                      puts 'Generating a new revision...'
+                      chatgpt_revision = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                      puts "Revised sentence: #{chatgpt_revision}"
+                      puts 'How do you like this revision? Indicate whether you accept or want another rewrite.'
+                      puts 'Input Y|y or N|n to indicate yes or no to accepting this revision.'
+                      response = gets.chomp
+                      until response == 'Y' || response == 'y' do
+                        puts 'Generating a new revision...'
+                        chatgpt_revision = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                        puts "New revised sentence: #{chatgpt_revision}"
+                        puts 'How do you like this new revision? Indicate whether you accept or want another rewrite.'
+                        response = gets.chomp
+                      end
+                      revised_chapter.gsub! match[:sentence], chatgpt_revision
+                    when 3
+                      puts "Leaving sentence #{match[:sentence_count]} unaltered: '#{match[:sentence]}'..."
+                    else raise 'Invalid choice. Must be 1, 2, or 3'
+                    end
+                  else
+                    raise 'Invalid choice. Must be 1 or 2'
+                  end
+                when 3
+                  print "Removing sentence #{match[:sentence_count]}: '#{match[:sentence]}'..."
+                  revised_chapter.gsub! match[:sentence], ''
+                  puts ' Done!'
+                else raise 'Invalid choice. Must be 1, 2, or 3'
+                end
               end
             else raise 'Invalid operation. Must be 1, 2, 3, or 4'
             end
