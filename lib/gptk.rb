@@ -9,7 +9,7 @@ end
 
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
-  VERSION = '0.5.2'.freeze
+  VERSION = '0.6'.freeze
   attr_accessor :mode
 
   @mode = ARGV[0] || 0 # The script run mode is set via CLI argument

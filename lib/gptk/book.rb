@@ -243,8 +243,8 @@ module GPTK
     #   An API key for authenticating requests to the Claude client.
     #   Defaults to `nil` if not explicitly provided.
     #
-    # @return [String]
-    #   The final revised chapter
+    # @return [Array<String>]
+    #   The final revised chapter, in two formats: plain text, and numbered (by sentence)
     #
     # @example Revise a chapter with ChatGPT and Claude clients
     #   chapter = [
@@ -300,13 +300,7 @@ module GPTK
                            end
         end
 
-        # Remove any duplicate matches from Claude's results
-        duplicates = []
-        claude_matches.each do |match|
-          if chatgpt_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
-            duplicates << match
-          end
-        end
+        # Remove any duplicate matches from Claude's results (matches already picked up by ChatGPT)
         claude_matches.delete_if do |match|
           chatgpt_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
         end
@@ -316,7 +310,7 @@ module GPTK
           end
         end
 
-        bad_patterns = chatgpt_matches.concat claude_matches
+        bad_patterns = chatgpt_matches.uniq.concat claude_matches.uniq
         # Group the results by match
         bad_patterns = bad_patterns.map { |p| Utils.symbolify_keys p }.group_by { |i| i[:match] }
         # Sort the matches by the order of when they appear in the chapter
@@ -324,10 +318,7 @@ module GPTK
           bad_patterns[pattern] = matches.sort_by { |m| m[:word] }
         end
 
-        # ChatGPT setup
-        # Grab the latest Assistant
-        assistant_id = @chatgpt_client.assistants.list['data'].last['id']
-        # Create a new Thread
+        # Create a new ChatGPT Thread
         thread_id = chatgpt_client.threads.create['id']
 
         match_count = bad_patterns.values.flatten.count
@@ -377,7 +368,6 @@ module GPTK
                 claude_revised_sentence = GPTK::AI::Claude.query_with_memory anthropic_api_key,
                                                                              [{ role: 'user', content: prompt }]
                 # Revise the chapter text based on AI feedback
-                # TODO: fix duplicates!
                 puts "Revising sentence #{match[:sentence_count]} using Claude..."
                 puts "Original: #{match[:sentence]}"
                 puts "Revision: #{claude_revised_sentence}"
@@ -400,7 +390,7 @@ module GPTK
         when 2 # Iterate through bad patterns and prompt user for action to perform on all matches per pattern
           bad_patterns.each do |pattern, matches|
             sentence_positions = matches.sort_by { |m| m[:sentence_count] }.collect { |m| m[:sentence_count] }.join ', '
-            puts "Bad pattern detected: '#{pattern}'. #{matches.count} matches found (sentences #{sentence_positions})"
+            puts "\nBad pattern detected: '#{pattern}' #{matches.count} matches found (sentences #{sentence_positions})"
             puts "Which operation do you wish to apply to all #{matches.count} matches?"
             puts '1) Keep as is, 2) Change, 3) Delete, or 4) Review'
             operation = gets.to_i
@@ -416,7 +406,7 @@ module GPTK
               when 1 # Have ChatGPT auto-revise content
                 matches.each do |match|
                   prompt = <<~STR
-                    Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{match[:match]}'. SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+                    Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{pattern}'. SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
                   STR
                   puts "Revising sentence #{match[:sentence_count]}..."
                   chatgpt_revised_sentence = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
@@ -429,10 +419,10 @@ module GPTK
                 user_prompt = gets
                 matches.each do |match|
                   prompt = <<~STR
-                    Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{match[:match]}'. SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion. #{user_prompt}
+                    Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{pattern}'. SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion. #{user_prompt}
                   STR
                   puts "Revising sentence #{match[:sentence_count]}..."
-                  chatgpt_revised_sentence = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                  chatgpt_revised_sentence = GPTK::AI::ChatGPT.query @chatgpt_client, @data, "#{prompt}"
                   puts "ChatGPT revision: '#{chatgpt_revised_sentence}'"
                   revised_chapter.gsub! match[:sentence], chatgpt_revised_sentence
                 end
@@ -447,9 +437,9 @@ module GPTK
               end
               puts "Deleted #{matches.count} bad pattern occurrences!"
             when 4 # Interactively or automagically address each bad pattern match one by one
-              # TODO: 3 operations per match for using AI - apply change, rewrite, keep
               puts "Reviewing #{matches.count} matches of pattern: '#{pattern}'..."
               matches.each do |match|
+                puts "Pattern: #{match[:match]}"
                 puts "Sentence: #{match[:sentence]}"
                 puts "Sentence Number: #{match[:sentence_count]}"
                 puts 'Would you like to 1) Keep as is, 2) Revise, or 3) Delete?'
@@ -512,61 +502,9 @@ module GPTK
         else raise 'Invalid mode. Must be 1, or 2'
         end
 
-        # Give every sentence of the revised chapter a number, for troubleshooting
+        # Give every sentence of the revised chapter a number, for proofreading and correcting errors later
         revised = revised_chapter.split /(?<=\.)|(?<=\!)|(?<=\?)/
         numbered_chapter_text = revised.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
-
-        # TODO: interaction 1: batch mode prompt
-        # TODO: interaction loop
-        # TODO: options: change, eliminate, and/or ignore for EACH OCCURRENCE
-
-        # instructions_prompt = <<~STR
-        #   Revise the following chapter fragment based upon these rules: 1) Scan your memory and check the current fragment for presence of the following phrases or words, and rewrite the fragment ONLY allowing ONE total usage of any of the given phrases or words in the list for the current chapter, amongst all the chapter fragments, AND expand your analysis to include a 'proximal word cloud' for each bad pattern. Here is the list: #{CONFIG[:bad_phrases].join('; ')}. END OF LIST. Refrain from adding conversation to the user in the output; keep it content only.
-        # STR
-        #
-        # begin
-        #   puts 'Revising chapter...'
-        #
-        #   if chatgpt_client
-        #     # Grab the latest Assistant
-        #     assistant_id = @chatgpt_client.assistants.list['data'].last['id']
-        #     # Create a new Thread
-        #     thread_id = chatgpt_client.threads.create['id']
-        #     # ChatGPT setup
-        #     chatgpt_client.messages.create thread_id: thread_id, parameters: { role: 'user', content: chapter_text }
-        #   end
-        #
-        #   if claude_client
-        #     # Claude setup
-        #     claude_memory = { role: 'user',
-        #                       content: [
-        #                         { type: 'text', text: instructions_prompt, cache_control: { type: 'ephemeral' } }
-        #                       ] }
-        #   end
-        #
-        #   # Loop over each chapter fragment, revising each one and returning the results as an array of chapter fragments
-        #   chapter.each_with_index do |fragment, i|
-        #     chatgpt_prompt = "#{instructions_prompt}\n\nFRAGMENT:\n\n#{fragment}"
-        #     revised_fragment = if chatgpt_client # If ChatGPT agent is given OR if additional agents are given as well
-        #                          GPTK::AI::ChatGPT.run_assistant_thread @chatgpt_client,
-        #                                                                 thread_id, assistant_id, chatgpt_prompt
-        #                        else # Claude
-        #                          claude_memory[:content].first[:text] << "\n\nFRAGMENT:\n\n#{fragment}"
-        #                          claude_revision = GPTK::AI::Claude.query @claude_client,
-        #                                                                   prompt: claude_memory[:content].first[:text]
-        #                          claude_memory[:content].first[:text] << "\n\nFRAGMENT #{i + 1}:\n\n#{claude_revision}"
-        #                          chatgpt_client.messages.create(
-        #                            thread_id: thread_id,
-        #                            parameters: { role: 'user', content: "\n\nFRAGMENT #{i + 1}:\n\n#{claude_revision}" }
-        #                          )
-        #                          claude_revision
-        #                        end
-        #     if chatgpt_client && claude_client # If using Claude with ChatGPT, have it respond to ChatGPT's analysis
-        #       claude_memory[:content].first[:text] << "\n\nFRAGMENT:\n\n#{revised_fragment}"
-        #       revised_fragment = GPTK::AI::Claude.query_with_memory anthropic_api_key, [claude_memory]
-        #     end
-        #     revised_chapter << revised_fragment
-        #   end
       ensure
         @chatgpt_client.threads.delete id: thread_id # Garbage collection
         @last_output = revised_chapter
@@ -574,11 +512,11 @@ module GPTK
         puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}" if claude_memory
       end
 
-      numbered_chapter_text || ''
+      [revised_chapter, numbered_chapter_text]
     end
 
     # Generate one or more chapters of the book
-    # todo: update for multiple clients
+    # TODO: update for multiple clients
     def generate(number_of_chapters = CONFIG[:num_chapters])
       CONFIG[:num_chapters] = number_of_chapters
       # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
