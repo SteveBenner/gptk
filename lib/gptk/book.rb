@@ -1,24 +1,27 @@
 module GPTK
+  # TODO: update all methods based on latest 0.6 changes and multiple ai agents
   class Book
     $chapters, $outline, $last_output = [], '', nil
     attr_reader :chapters, :chatgpt_client, :claude_client, :last_output
     attr_accessor :parsers, :output_file, :genre, :instructions, :outline
 
     def initialize(outline,
-                   openai_client: '',
-                   anthropic_client: '',
+                   openai_client: nil,
+                   anthropic_client: nil,
+                   xai_api_key: nil,
                    instructions: '',
                    output_file: '',
                    rec_prompt: '',
                    genre: '',
                    parsers: CONFIG[:parsers],
                    mode: GPTK.mode)
-      unless openai_client || anthropic_client
+      unless openai_client || anthropic_client || xai_api_key
         puts 'Error: You must pass in at least ONE AI agent client object to the `new` method.'
         return
       end
       @chatgpt_client = openai_client
       @claude_client = anthropic_client
+      @xai_api_key = xai_api_key
       # Reference document for book generation
       outline = ::File.exist?(outline) ? ::File.read(outline) : outline
       @outline = outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
@@ -28,7 +31,7 @@ module GPTK
       @output_file = ::File.expand_path output_file
       @genre = genre
       @parsers = parsers
-      @mode = mode
+      @mode = mode.to_i
       @rec_prompt = ::File.exist?(rec_prompt) ? ::File.read(rec_prompt) : rec_prompt
       @chapters = [] # Book content
       @data = { # Data points to track while generating a book chapter by chapter
@@ -43,7 +46,6 @@ module GPTK
 
     # Construct the prompt passed to the AI agent
     def build_prompt(prompt, fragment_number)
-      # meta_prompt = "Current chapter: #{chapter_number}.\n"
       generation_prompt = (fragment_number == 1) ? CONFIG[:initial_prompt] : CONFIG[:continue_prompt]
       [generation_prompt, prompt].join ' '
     end
@@ -129,49 +131,59 @@ module GPTK
     end
 
     # Generate one complete chapter of the book using the given prompt
-    def generate_chapter(general_prompt, thread, assistant_id = nil, fragments = GPTK::Book::CONFIG[:chapter_fragments], recommendations_prompt = nil)
-      messages = []
+    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments], xai_api_key: nil)
+      messages = [] if @chatgpt_client
+      chapter = []
 
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
-        @clients.first.messages.create(
-          thread_id: thread,
-          parameters: { role: 'user', content: prompt }
-        )
+        puts "Generating fragment #{i}"
 
-        # Create the run
-        response = @clients.first.runs.create(
-          thread_id: thread,
-          parameters: { assistant_id: assistant_id }
-        )
-        run_id = response['id']
+        if @chatgpt_client
+          @chatgpt_client.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
+          )
 
-        # Loop while awaiting status of the run
-        while true do
-          response = @clients.first.runs.retrieve id: run_id, thread_id: thread
-          status = response['status']
+          # Create the run
+          response = @chatgpt_client.runs.create(
+            thread_id: thread_id,
+            parameters: { assistant_id: assistant_id }
+          )
+          run_id = response['id']
 
-          case status
-          when 'queued', 'in_progress', 'cancelling'
-            puts 'Processing...'
-            sleep 1 # Wait one second and poll again
-          when 'completed'
-            messages = @clients.first.messages.list thread_id: thread, parameters: { order: 'asc' }
-            break # Exit loop and report result to user
-          when 'requires_action'
-            # Handle tool calls (see below)
-          when 'cancelled', 'failed', 'expired'
-            puts response['last_error'].inspect
-            break
-          else
-            puts "Unknown status response: #{status}"
+          # Loop while awaiting status of the run
+          while true do
+            response = @chatgpt_client.runs.retrieve id: run_id, thread_id: thread_id
+            status = response['status']
+
+            case status
+            when 'queued', 'in_progress', 'cancelling'
+              puts 'Processing...'
+              sleep 1 # Wait one second and poll again
+            when 'completed'
+              messages = @chatgpt_client.messages.list thread_id: thread_id, parameters: { order: 'asc' }
+              break # Exit loop and report result to user
+            when 'requires_action'
+              # Handle tool calls (see below)
+            when 'cancelled', 'failed', 'expired'
+              puts response['last_error'].inspect
+              break
+            else
+              puts "Unknown status response: #{status}"
+            end
           end
         end
 
-        puts messages['data'].last['content'].first['text']['value']
+        # Using Grok
+        chapter << GPTK::AI::Grok.query(xai_api_key, prompt)
       end
 
-      messages
+      if @chatgpt_client
+        messages
+      else
+        chapter
+      end
     end
 
     # Generate one complete chapter of the book using the zipper technique
@@ -215,10 +227,138 @@ module GPTK
       chapter # Array of Strings representing chapter fragments for one chapter
     end
 
-    # todo: apply user-generated revisions
-    #   - pattern by pattern, interact with human!
-    #   - options: change, eliminate, and/or ignore for EACH OCCURRENCE
-    #   - batch mode: offer an option to batch one of the choices for EACH PATTERN
+    # Generate one or more chapters of the book
+    # TODO: update for multiple clients
+    def generate(number_of_chapters = CONFIG[:num_chapters])
+      CONFIG[:num_chapters] = number_of_chapters
+      book = []
+      # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
+      case @mode
+      when 1
+        puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
+        puts 'Sending initial prompt, and GPT instructions...'
+
+        if @chatgpt_client
+          # Create the Assistant if it does not exist already
+          assistant_id = if @chatgpt_client.first.assistants.list['data'].empty?
+                          response = @chatgpt_client.first.assistants.create(
+                             parameters: {
+                               model: GPTK::AI::CONFIG[:openai_gpt_model],
+                               name: 'AI Book generator',
+                               description: nil,
+                               instructions: @instructions
+                             }
+                           )
+                           response['id']
+                         else
+                           @chatgpt_client.first.assistants.list['data'].first['id']
+                         end
+
+          # Create the Thread
+          response = @chatgpt_client.first.threads.create
+          thread_id = response['id']
+
+          # Send the AI the book outline for future reference
+          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
+          @chatgpt_client.first.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
+          )
+        end
+
+        # Generate as many chapters as are specified
+        (1..number_of_chapters).each do |i|
+          puts "Generating chapter #{i}..."
+          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
+          book << generate_chapter(prompt, xai_api_key: @xai_api_key)
+        end
+        # Cache result of last operation
+        @last_output = response if @chatgpt_client
+
+        # Output useful metadata
+        # output_run_info
+        # output_run_info @output_file
+        @@start_time = Time.now
+
+        @chatgpt_client.threads.delete(id: thread_id) if @chatgpt_client # Garbage collection
+
+        book
+      when 2 # TODO
+      when 3 # TODO
+      else puts 'Please input a valid script run mode.'
+      end
+    end
+
+    # Generate one or more chapters of the book
+    def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1)
+      @@start_time = Time.now
+      CONFIG[:num_chapters] = number_of_chapters # Update config
+      chapters = []
+      begin
+        puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
+        puts 'Sending initial prompt, and GPT instructions...'
+
+        prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
+
+        if @chatgpt_client
+          # Create the Assistant if it does not exist already
+          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
+                           response = @chatgpt_client.assistants.create(
+                             parameters: {
+                               model: GPTK::AI::CONFIG[:openai_gpt_model],
+                               name: 'AI Book generator',
+                               description: nil,
+                               instructions: @instructions
+                             }
+                           )
+                           response['id']
+                         else
+                           @chatgpt_client.assistants.list['data'].last['id']
+                         end
+
+          # Create the Thread
+          thread_id = @chatgpt_client.threads.create['id']
+
+          # Send ChatGPT the book outline for future reference
+          @chatgpt_client.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
+          )
+        end
+
+        claude_memory = {}
+        if @claude_client
+          # Instantiate Claude memory for chapter production conversation
+          # Ensure `claude_messages` is always an Array with ONE element using cache_control type: 'ephemeral'
+          initial_memory = "#{prompt}\n\nINSTRUCTIONS FOR CLAUDE:\n\n#{@instructions}END OF INSTRUCTIONS"
+          claude_memory = { role: 'user', content: [{ type: 'text', text: initial_memory, cache_control: { type: 'ephemeral' } }] }
+        end
+
+        # Generate as many chapters as are specified
+        parity = 0
+        prev_chapter = []
+        (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
+          chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
+          parity = parity.zero? ? 1 : 0
+          prev_chapter = chapter
+          @last_output = chapter # Cache results of the last operation
+          chapters << chapter
+        end
+
+        @last_output = chapters # Cache results of the last operation
+        chapters # Return the generated story chapters
+      ensure
+        @chatgpt_client.threads.delete id: thread_id # Garbage collection
+        # Output some metadata - useful information about the run, API status, book content, etc.
+        $chapters = chapters
+        $outline = @outline
+        $last_output = @last_output
+        puts "Elapsed time: #{((Time.now - @@start_time) / 60).round(2)} minutes"
+        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}"
+      end
+      puts "Congratulations! Successfully generated #{chapters.count} chapters."
+      chapters
+    end
 
     # Revises a chapter fragment-by-fragment, ensuring adherence to specific content rules.
     #
@@ -338,7 +478,7 @@ module GPTK
         case mode
         when 1 # Apply operation to ALL matches
           bad_matches = bad_patterns # Flatten the grouped matches into a single list and order them
-                        .flatten.flatten.delete_if { |p| p.instance_of? String }.sort_by { |p| p[:sentence_count] }
+                          .flatten.flatten.delete_if { |p| p.instance_of? String }.sort_by { |p| p[:sentence_count] }
           puts "Which operation do you wish to apply to all #{bad_matches.count}? 1) Keep as is, 2) Change, 3) Delete"
           operation = gets.to_i
 
@@ -513,132 +653,6 @@ module GPTK
       end
 
       [revised_chapter, numbered_chapter_text]
-    end
-
-    # Generate one or more chapters of the book
-    # TODO: update for multiple clients
-    def generate(number_of_chapters = CONFIG[:num_chapters])
-      CONFIG[:num_chapters] = number_of_chapters
-      # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
-      case @mode
-      when 1
-        puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
-        puts 'Sending initial prompt, and GPT instructions...'
-
-        # Create the Assistant if it does not exist already
-        assistant_id = if @clients.first.assistants.list['data'].empty?
-          response = @clients.first.assistants.create(
-            parameters: {
-              model: GPTK::AI::CONFIG[:openai_gpt_model],
-              name: 'AI Book generator',
-              description: nil,
-              instructions: @instructions
-            }
-          )
-          response['id']
-                       else
-                         @clients.first.assistants.list['data'].first['id']
-                       end
-
-        # Create the Thread
-        response = @clients.first.threads.create
-        thread_id = response['id']
-
-        # Send the AI the book outline for future reference
-        prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
-        @clients.first.messages.create(
-          thread_id: thread_id,
-          parameters: { role: 'user', content: prompt }
-        )
-
-        # Generate as many chapters as are specified
-        prompt = "Generate a fragment of chapter 1 of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content."
-        messages = generate_chapter prompt, 1, thread_id, assistant_id
-
-        # Cache result of last operation
-        @last_output = messages
-
-        # Output useful metadata
-        # output_run_info
-        # output_run_info @output_file
-        @@start_time = Time.now
-
-        response
-      when 2 # TODO
-      when 3 # TODO
-      else puts 'Please input a valid script run mode.'
-      end
-    end
-
-    # Generate one or more chapters of the book
-    def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1)
-      @@start_time = Time.now
-      CONFIG[:num_chapters] = number_of_chapters # Update config
-      chapters = []
-      begin
-        puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
-        puts 'Sending initial prompt, and GPT instructions...'
-
-        prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
-
-        if @chatgpt_client
-          # Create the Assistant if it does not exist already
-          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
-                           response = @chatgpt_client.assistants.create(
-                             parameters: {
-                               model: GPTK::AI::CONFIG[:openai_gpt_model],
-                               name: 'AI Book generator',
-                               description: nil,
-                               instructions: @instructions
-                             }
-                           )
-                           response['id']
-                         else
-                           @chatgpt_client.assistants.list['data'].last['id']
-                         end
-
-          # Create the Thread
-          thread_id = @chatgpt_client.threads.create['id']
-
-          # Send ChatGPT the book outline for future reference
-          @chatgpt_client.messages.create(
-            thread_id: thread_id,
-            parameters: { role: 'user', content: prompt }
-          )
-        end
-
-        claude_memory = {}
-        if @claude_client
-          # Instantiate Claude memory for chapter production conversation
-          # Ensure `claude_messages` is always an Array with ONE element using cache_control type: 'ephemeral'
-          initial_memory = "#{prompt}\n\nINSTRUCTIONS FOR CLAUDE:\n\n#{@instructions}END OF INSTRUCTIONS"
-          claude_memory = { role: 'user', content: [{ type: 'text', text: initial_memory, cache_control: { type: 'ephemeral' } }] }
-        end
-
-        # Generate as many chapters as are specified
-        parity = 0
-        prev_chapter = []
-        (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
-          chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
-          parity = parity.zero? ? 1 : 0
-          prev_chapter = chapter
-          @last_output = chapter # Cache results of the last operation
-          chapters << chapter
-        end
-
-        @last_output = chapters # Cache results of the last operation
-        chapters # Return the generated story chapters
-      ensure
-        @chatgpt_client.threads.delete id: thread_id # Garbage collection
-        # Output some metadata - useful information about the run, API status, book content, etc.
-        $chapters = chapters
-        $outline = @outline
-        $last_output = @last_output
-        puts "Elapsed time: #{((Time.now - @@start_time) / 60).round(2)} minutes"
-        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}"
-      end
-      puts "Congratulations! Successfully generated #{chapters.count} chapters."
-      chapters
     end
   end
 end

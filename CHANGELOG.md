@@ -1,11 +1,14 @@
 # Changelog
 
-## 0.6
+## 0.7
+- Integrated Grok via `GPTK::AI::Grok` module
+
+## 0.6 - 2024.12.04
 - Added `Book::revise_chapter1` which represents a totally new system for interactively revising chapter content, analyzing for bad patterns and then, either altering the text content, removing the match entirely, or simply ignoring the match.
 - Includes 3 modes:
   - Mode 1: Apply an operation to ALL instances of bad pattern matches at once.
   - Mode 2: Iterate through each bad pattern and choose an operation to apply to all of the matches.
-  - Mode 3: Interactively go through each bad pattern match and decide which operation to apply.
+  - Mode 2A: Interactively go through each bad pattern match and decide which operation to apply.
 - Added a `Utils` module for extra goodies
 
 ## 0.5 - 2024.11.27

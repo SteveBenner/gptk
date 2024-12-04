@@ -8,7 +8,7 @@ module GPTK
       # - o1-mini (faster and cheaper reasoning model particularly good at coding, math, and science.)
       # - gpt-4-turbo (a large multimodal model that can accept text or image inputs and output text,
       #   solving complex problems more accurately than previous models)
-      openai_gpt_model: 'gpt-4o-mini'.freeze,
+      openai_gpt_model: 'gpt-4o-mini',
       openai_temperature: 0.7, # Less = more precise, less creative; more = more expansive & creative
       openai_max_tokens: 8192, # GTP-4 max output tokens per request,
       batch_ping_interval: 60, # How long in seconds to wait before checking on the status of a Batch
@@ -18,8 +18,11 @@ module GPTK
       # - claude-3-opus-latest
       # - claude-3-sonnet-20240229
       # - claude-3-haiku-20240307
-      anthropic_gpt_model: 'claude-3-5-sonnet-latest'.freeze,
-      anthropic_max_tokens: 1024
+      anthropic_gpt_model: 'claude-3-5-sonnet-latest',
+      anthropic_max_tokens: 1024,
+      # Grok only has one available model currently
+      xai_model: 'grok-beta',
+      xai_temperature: 0
     }
   end
 end

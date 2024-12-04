@@ -13,15 +13,6 @@ module GPTK
       post_prompt: 'Make SURE to include the chapter number with the chapter title.',
       command_code: 'The response should FIRST contain the chapter content, THEN, delineated with 3 dashes (markdown horizontal line), a summary of the current chapter fragment. Delineation of the summary MUST be 3 dashes SPECIFICALLY.',
       meta_prompt: 'Maintain continuity and do NOT repeat any previously generated material. Generate as much content as possible. AVOID commentary to the user; just produce book content. AVOID expose, i.e. "telling" instead of "showing". AVOID explaining what is going on at the end of a fragment/chapter, like "the stage was set" or "the chapter closed". AVOID repeating phrases or elements that have already been used, such as "shivers went down her spine" and "the air was thick with tension". AVOID cliches and trite writing style. AVOID cliches, platitudes, and trite phraseology.',
-      bad_phrases: [
-        'Mind (raced)',
-        'Shiver, spine',
-        'something you need to see',
-        'heart (raced, pounded, etc)',
-        'discovered',
-        'changes everything',
-        'eerie', 'the air', 'weight', 'truth', 'justice', 'tension', 'burst'
-      ],
       # Define atomic parsing steps via Ruby procs, so they can be passed individually to parser methods
       # Each element is composed of 1) A regular expression search pattern, and 2) A string replacement pattern
       default_parsers: { # Regex, replacement
@@ -42,6 +33,6 @@ module GPTK
         remove_extra_newlines_from_start_of_file: [/\n\n(.*)/i, '\1'],
         remove_chapter_conclusion: [/---\n\n.*chapter*[^-]*---/, nil]
       }
-    }.freeze
+    }
   end
 end

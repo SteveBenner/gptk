@@ -137,8 +137,8 @@ module GPTK
         }
       end
 
+      # Manual HTTP API call
       def self.query_with_memory(api_key, messages)
-        # Anthropic manual HTTP setup
         headers = {
           'x-api-key' => api_key,
           'anthropic-version' => '2023-06-01',
@@ -177,7 +177,43 @@ module GPTK
 
     # XAI's Grok
     module Grok
-
+      def self.query(api_key, prompt, system_prompt = nil)
+        # Grok manual HTTP API call
+        headers = {
+          'Authorization' => "Bearer #{api_key}",
+          'content-type' => 'application/json'
+        }
+        messages = [{ 'role': 'user', 'content': prompt }]
+        messages.prepend({ 'role': 'system', content: system_prompt }) if system_prompt
+        body = {
+          'model': CONFIG[:xai_model],
+          'stream': false,
+          'temperature': CONFIG[:xai_temperature],
+          'messages': messages
+        }
+        response = HTTParty.post(
+          'https://api.x.ai/v1/chat/completions',
+          headers: headers,
+          body: body.to_json
+        )
+        # TODO: track data
+        # Return text content of the Grok API response
+        sleep 1 # Important to avoid race conditions and especially token throttling!
+        begin
+          output = JSON.parse(response.body).dig 'choices', 0, 'message', 'content'
+        rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
+          puts "Error: #{e.class}. Retrying query..."
+          sleep 10
+          output = query_with_memory api_key, messages
+        end
+        if output.nil?
+          ap JSON.parse response.body
+          puts 'Error: Grok API provided an empty response. Retrying query...'
+          sleep 10
+          output = query_with_memory api_key, messages
+        end
+        output
+      end
     end
 
     # Google's Gemini
