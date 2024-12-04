@@ -160,7 +160,6 @@ module GPTK
         sleep 1 # Important to avoid race conditions and especially token throttling!
         begin
           output = JSON.parse(response.body).dig 'content', 0, 'text'
-        # TODO: this isn't working - figure out what to do in its place
         rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
           puts "Error: #{e.class}. Retrying query..."
           sleep 10
@@ -168,10 +167,11 @@ module GPTK
         end
         if output.nil?
           ap JSON.parse response.body
-          puts 'Error: Claude API provided an empty response!'
-        else
-          output
+          puts 'Error: Claude API provided an empty response. Retrying query...'
+          sleep 10
+          output = query_with_memory api_key, messages
         end
+        output
       end
     end
 

@@ -274,7 +274,17 @@ module GPTK
 
         # Scan for bad patterns and generate an Array of results to later parse out of the book content
         bad_pattern_prompt = <<~STR
-          Scan the following chapter for bad patterns, defined here: (#{CONFIG[:bad_phrases].join('; ')}) and return the results as a Ruby object. ONLY output the object, no other response text or conversation, and do not put it in a Markdown Ruby block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output.\n\nCHAPTER:\n\n#{numbered_chapter_text}
+          Analyze the given chapter text exhaustively for the following writing patterns, and output all found matches as a JSON object. Scan for MULTIPLE matches for each pattern. Patterns:
+          1. **Excessive Quotations or Overused Sayings**: Identify instances where quotes, idioms, aphorisms, or platitudes are over-relied upon, leading to a lack of originality in expression.
+          2. **Clichés**: Highlight phrases or expressions that are overly familiar or predictable, diminishing the impact of the prose.
+          3. **Cheesy or Overwrought Descriptions**: Pinpoint descriptions that are overly sentimental, melodramatic, unrefined, or simply using exposé (i.e., “telling” not “showing” the plot advancement).
+          4. **Redundancies**: Detect repetitive ideas, words, or phrases that do not add value or nuance to the text.
+          5. **Pedantic Writing**: Flag passages that feel condescending or patronizing without advancing the narrative or theme.
+          6. **Basic or Unsophisticated Language**: Identify "basic-bitch" tendencies, such as dull word choices, shallow insights, obtuse statements, or oversimplified metaphors.
+          7. **Overstated or Over-explanatory Passages**: Locate areas where the text feels "spelled out" unnecessarily, where the writing style is overly “telling” the story instead of “showing” it with descriptive narrative.
+          8. **Forced Idioms or Sayings**: Highlight awkwardly inserted idiomatic expressions that clash with the tone or context of the writing.
+
+          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output.\n\nCHAPTER:\n\n#{numbered_chapter_text}
         STR
         chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
         ap chatgpt_matches
@@ -282,6 +292,13 @@ module GPTK
           anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
         )
         ap claude_matches
+        claude_matches = if claude_matches['matches']
+                           claude_matches['matches']
+                         elsif claude_matches['patterns']
+                           claude_matches['patterns']
+                         else
+                           claude_matches
+                         end
 
         # Remove any duplicate matches from Claude's results
         duplicates = []
@@ -313,7 +330,8 @@ module GPTK
         # Create a new Thread
         thread_id = chatgpt_client.threads.create['id']
 
-        puts "#{bad_patterns.count} bad patterns detected:"
+        match_count = bad_patterns.values.flatten.count
+        puts "#{bad_patterns.count} bad patterns detected (#{match_count} total matches):"
         bad_patterns.each do |pattern, matches|
           puts "- '#{pattern}' (#{matches.count} counts)"
         end
@@ -328,21 +346,20 @@ module GPTK
         revised_chapter = chapter_text
         case mode
         when 1 # Apply operation to ALL matches
-          puts "Which operation do you wish to apply to all #{bad_patterns.count}? 1) Keep as is, 2) Change, 3) Delete"
+          bad_matches = bad_patterns # Flatten the grouped matches into a single list and order them
+                        .flatten.flatten.delete_if { |p| p.instance_of? String }.sort_by { |p| p[:sentence_count] }
+          puts "Which operation do you wish to apply to all #{bad_matches.count}? 1) Keep as is, 2) Change, 3) Delete"
           operation = gets.to_i
 
           case operation
           when 1 then puts 'Content accepted as-is.'
           when 2 # Have Claude or ChatGPT revise each sentence containing a bad pattern match
-            bad_patterns = bad_patterns # Flatten the grouped matches into a single list and order them
-                           .flatten.flatten.delete_if { |p| p.instance_of? String }.sort_by { |p| p[:sentence_count] }
-            puts 'Would you like to 1) replace each match occurrence manually, or 2) use ChatGPT to replace it?'
-            puts 'Input an option.'
+            puts 'Would you like to 1) replace each match occurrence manually, or 2) use Claude to replace it?'
             choice = gets.to_i
 
             case choice
             when 1
-              bad_patterns.each do |pattern|
+              bad_matches.each do |pattern|
                 puts "Pattern: #{pattern[:match]}"
                 puts "Sentence: #{pattern[:sentence]}"
                 puts "Sentence Number: #{pattern[:sentence_count]}"
@@ -352,31 +369,29 @@ module GPTK
                 puts 'Revision complete!'
               end
             when 2
-              bad_patterns.each do |pattern|
+              bad_matches.each do |match|
                 prompt = <<~STR
-                  Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{pattern[:match]}'. SENTENCE: '#{pattern[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+                  Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{match[:match]}'. SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
                 STR
                 # chatgpt_revised_sentence = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
                 claude_revised_sentence = GPTK::AI::Claude.query_with_memory anthropic_api_key,
                                                                              [{ role: 'user', content: prompt }]
                 # Revise the chapter text based on AI feedback
-                puts 'Revising chapter...'
+                puts "Revising sentence #{match[:sentence_count]} using Claude..."
                 puts "Revision: #{claude_revised_sentence}"
                 sleep 1
-                revised_chapter.gsub! pattern[:sentence], claude_revised_sentence
+                revised_chapter.gsub! match[:sentence], claude_revised_sentence
               end
             else raise 'Error: Input either 1 or 2'
             end
 
-            puts "Successfully enacted #{bad_patterns.count} revisions!"
+            puts "Successfully enacted #{bad_matches.count} revisions!"
           when 3 # Delete all examples of bad pattern sentences
-            bad_patterns = bad_patterns # Flatten the grouped matches into a single list and order them
-                           .flatten.flatten.delete_if { |p| p.instance_of? String }.sort_by { |p| p[:sentence_count] }
-            bad_patterns.each do |pattern|
+            bad_matches.each do |match|
               puts 'Revising chapter...'
-              puts "Sentence [#{pattern[:sentence_count]}] deleted: #{pattern[:sentence]}"
+              puts "Sentence [#{match[:sentence_count]}] deleted: #{match[:sentence]}"
               sleep 1
-              revised_chapter.gsub! pattern[:sentence], ''
+              revised_chapter.gsub! match[:sentence], ''
             end
           else raise 'Invalid operation. Must be 1, 2, or 3'
           end
