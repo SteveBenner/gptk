@@ -269,7 +269,7 @@ module GPTK
 
       begin
         # Give every sentence of the chapter a number, for parsing out bad patterns
-        sentences = chapter_text.split /(?<!\. \. \.)(?<!O\.B\.F)(?<=\.|!|\?)/ # TODO: fix regex
+        sentences = chapter_text.split /(?<!\.\.\.)(?<!O\.B\.F\.)(?<=\.|!|\?)/ # TODO: fix regex
         numbered_chapter_text = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
 
         # Scan for bad patterns and generate an Array of results to later parse out of the book content
@@ -314,13 +314,13 @@ module GPTK
         thread_id = chatgpt_client.threads.create['id']
 
         puts "#{bad_patterns.count} bad patterns detected:"
-        bad_patterns.each_key do |pattern|
-
+        bad_patterns.each do |pattern, matches|
+          puts "- '#{pattern}' (#{matches.count} counts)"
         end
 
         # Prompt user for the mode
-        puts "How would you like to proceed with the revision process for #{bad_patterns.count} bad patterns detected?"
-        puts 'Enter an option number: 1, 2:'
+        puts 'How would you like to proceed with the revision process for the detected bad patterns?'
+        puts 'Enter an option number: 1, or 2:'
         puts 'Mode 1: Apply an operation to ALL instances of bad pattern matches at once.'
         puts 'Mode 2: Iterate through each bad pattern and choose an operation to apply to all of the matches.'
         mode = gets.to_i
@@ -336,19 +336,38 @@ module GPTK
           when 2 # Have Claude or ChatGPT revise each sentence containing a bad pattern match
             bad_patterns = bad_patterns # Flatten the grouped matches into a single list and order them
                            .flatten.flatten.delete_if { |p| p.instance_of? String }.sort_by { |p| p[:sentence_count] }
-            bad_patterns.each do |pattern|
-              prompt = <<~STR
-                Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{pattern[:match]}'. SENTENCE: '#{pattern[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
-              STR
-              # chatgpt_revised_sentence = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
-              claude_revised_sentence = GPTK::AI::Claude.query_with_memory anthropic_api_key,
-                                                                           [{ role: 'user', content: prompt }]
-              # Revise the chapter text based on AI feedback
-              puts 'Revising chapter...'
-              puts "Revision: #{claude_revised_sentence}"
-              sleep 1
-              revised_chapter.gsub! pattern[:sentence], claude_revised_sentence
+            puts 'Would you like to 1) replace each match occurrence manually, or 2) use ChatGPT to replace it?'
+            puts 'Input an option.'
+            choice = gets.to_i
+
+            case choice
+            when 1
+              bad_patterns.each do |pattern|
+                puts "Pattern: #{pattern[:match]}"
+                puts "Sentence: #{pattern[:sentence]}"
+                puts "Sentence Number: #{pattern[:sentence_count]}"
+                puts 'Please input your revised sentence.'
+                revised_sentence = gets
+                revised_chapter.gsub! pattern[:sentence], revised_sentence
+                puts 'Revision complete!'
+              end
+            when 2
+              bad_patterns.each do |pattern|
+                prompt = <<~STR
+                  Revise the following sentence in order to eliminate the bad pattern, making sure completely rewrite the sentence. PATTERN: '#{pattern[:match]}'. SENTENCE: '#{pattern[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+                STR
+                # chatgpt_revised_sentence = GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                claude_revised_sentence = GPTK::AI::Claude.query_with_memory anthropic_api_key,
+                                                                             [{ role: 'user', content: prompt }]
+                # Revise the chapter text based on AI feedback
+                puts 'Revising chapter...'
+                puts "Revision: #{claude_revised_sentence}"
+                sleep 1
+                revised_chapter.gsub! pattern[:sentence], claude_revised_sentence
+              end
+            else raise 'Error: Input either 1 or 2'
             end
+
             puts "Successfully enacted #{bad_patterns.count} revisions!"
           when 3 # Delete all examples of bad pattern sentences
             bad_patterns = bad_patterns # Flatten the grouped matches into a single list and order them
@@ -363,7 +382,7 @@ module GPTK
           end
         when 2 # Iterate through bad patterns and prompt user for action to perform on all matches per pattern
           bad_patterns.each do |pattern, matches|
-            sentence_positions = matches.collect { |m| m[:sentence_count] }.join ', '
+            sentence_positions = matches.sort_by { |m| m[:sentence_count] }.collect { |m| m[:sentence_count] }.join ', '
             puts "Bad pattern detected: '#{pattern}'. #{matches.count} matches found (sentences #{sentence_positions})"
             puts "Which operation do you wish to apply to all #{matches.count} matches?"
             puts '1) Keep as is, 2) Change, 3) Delete, or 4) Review'
@@ -404,8 +423,19 @@ module GPTK
                 puts "Successfully revised #{matches.count} bad pattern occurrences using your prompt and ChatGPT!"
               else raise 'Invalid option. Must be 1 or 2'
               end
-            when 3 # TODO
-            when 4 # TODO
+            when 3 # Delete all instances of the bad pattern
+              matches.each do |match|
+                puts "Deleting sentence #{match[:sentence_count]}..."
+                revised_chapter.gsub! match[:sentence], ''
+                puts "Deleted: '#{match[:sentence]}'"
+              end
+              puts "Deleted #{matches.count} bad pattern occurrences!"
+            when 4 # Interactively or automagically address each bad pattern match one by one
+              puts ""
+              puts "Reviewing #{matches.count} matches of pattern #{pattern}..."
+              bad_patterns.each do |pattern|
+
+              end
             else raise 'Invalid operation. Must be 1, 2, 3, or 4'
             end
           end
