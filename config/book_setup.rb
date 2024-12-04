@@ -20,7 +20,7 @@ module GPTK
         'heart (raced, pounded, etc)',
         'discovered',
         'changes everything',
-        'eerie', 'the air', 'weight', 'truth', 'justice', 'tension', 'burst', 'lion'
+        'eerie', 'the air', 'weight', 'truth', 'justice', 'tension', 'burst'
       ],
       # Define atomic parsing steps via Ruby procs, so they can be passed individually to parser methods
       # Each element is composed of 1) A regular expression search pattern, and 2) A string replacement pattern

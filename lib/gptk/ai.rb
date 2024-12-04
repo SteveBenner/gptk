@@ -160,8 +160,9 @@ module GPTK
         sleep 1 # Important to avoid race conditions and especially token throttling!
         begin
           output = JSON.parse(response.body).dig 'content', 0, 'text'
-        rescue
-          puts 'Error: JSON parse error detected. Retrying query...'
+        # TODO: this isn't working - figure out what to do in its place
+        rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
+          puts "Error: #{e.class}. Retrying query..."
           sleep 10
           output = query_with_memory api_key, messages
         end
@@ -199,7 +200,7 @@ module GPTK
         # Send the prompt to the AI using the chat API, and retrieve the response
         begin
           content = ChatGPT.query doc.client, prompt, doc.data
-        rescue => e
+        rescue StandardError => e
           puts "Error: #{e.class}: #{e.message}"
           puts 'Please try operation again, or review the code.'
           puts 'Last operation response:'
