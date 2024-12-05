@@ -3,13 +3,13 @@ require 'yaml'
 require 'parallel'
 %w[ai book config doc file text utils].each do |lib|
   print "Loading module: #{lib.capitalize}... "
-  load "#{__dir__}/gptk/#{lib}.rb"
+  load "#{__dir__}/gptk/#{lib}.rb" # TODO: change to use 'require' for production
   puts 'Success!'
 end
 
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
-  VERSION = '0.6.1'.freeze
+  VERSION = '0.6.2'.freeze
   attr_accessor :mode
 
   @mode = ARGV[0] || 0 # The script run mode is set via CLI argument

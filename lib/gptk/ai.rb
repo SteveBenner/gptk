@@ -1,4 +1,5 @@
 module GPTK
+  # AI interfaces and tools
   module AI
     @last_output = nil # Track the cached output of the latest operation
     def self.last_output
@@ -18,12 +19,19 @@ module GPTK
         data[:completion_tokens] += response.dig 'usage', 'completion_tokens'
         data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
       end
+      sleep 1 # Important to avoid race conditions and especially token throttling!
       # Return the AI's response message (object deconstruction must be ABSOLUTELY precise!)
-      output = if client.instance_of? OpenAI::Client
-                 response.dig 'choices', 0, 'message', 'content'
-               else # Anthropic Claude
-                 response.dig 'content', 0, 'text'
-               end
+      begin
+        output = if client.instance_of? OpenAI::Client
+                   response.dig 'choices', 0, 'message', 'content'
+                 else # Anthropic Claude
+                   response.dig 'content', 0, 'text'
+                 end
+      rescue => e
+        puts "Error: #{e.class}. Retrying query..."
+        sleep 10
+        output = query client, data, params
+      end
       if output.nil?
         puts 'Error! Null output received from ChatGPT query.'
         until output
@@ -167,7 +175,7 @@ module GPTK
         end
         if output.nil?
           ap JSON.parse response.body
-          puts 'Error: Claude API provided an empty response. Retrying query...'
+          puts 'Error: Claude API provided a bad response. Retrying query...'
           sleep 10
           output = query_with_memory api_key, messages
         end
@@ -183,16 +191,52 @@ module GPTK
           'Authorization' => "Bearer #{api_key}",
           'content-type' => 'application/json'
         }
-        messages = [{ 'role': 'user', 'content': prompt }]
-        messages.prepend({ 'role': 'system', content: system_prompt }) if system_prompt
+        messages = if prompt.instance_of?(Array)
+                     prompt.collect { |p| { 'role': 'user', 'content': p } }
+                   else
+                     [{ 'role': 'user', 'content': prompt }]
+                   end
+        messages.prepend({ 'role': 'system', 'content': system_prompt }) if system_prompt
         body = {
-          'model': CONFIG[:xai_model],
+          'model': CONFIG[:xai_gpt_model],
           'stream': false,
           'temperature': CONFIG[:xai_temperature],
           'messages': messages
         }
         response = HTTParty.post(
           'https://api.x.ai/v1/chat/completions',
+          headers: headers,
+          body: body.to_json
+        )
+        ap JSON.parse response.body
+        # TODO: track data
+        # Return text content of the Grok API response
+        sleep 1 # Important to avoid race conditions and especially token throttling!
+        begin
+          output = JSON.parse(response.body).dig 'choices', 0, 'message', 'content'
+        rescue => e # We want to catch ALL errors, not just those under StandardError
+          puts "Error: #{e.class}. Retrying query..."
+          sleep 10
+          output = query api_key, messages
+        end
+        if output.nil?
+          ap JSON.parse response.body
+          puts 'Error: Grok API provided a bad response. Retrying query...'
+          sleep 10
+          output = query api_key, messages
+        end
+        output
+      end
+    end
+
+    # Google's Gemini
+    module Gemini
+      def self.query(api_key, prompt)
+        # Grok manual HTTP API call
+        headers = { 'content-type' => 'application/json' }
+        body = { 'contents': [{ 'parts': [{ 'text': prompt }] }] }
+        response = HTTParty.post(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=#{api_key}",
           headers: headers,
           body: body.to_json
         )
@@ -204,21 +248,16 @@ module GPTK
         rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
           puts "Error: #{e.class}. Retrying query..."
           sleep 10
-          output = query_with_memory api_key, messages
+          output = query api_key, prompt
         end
         if output.nil?
           ap JSON.parse response.body
           puts 'Error: Grok API provided an empty response. Retrying query...'
           sleep 10
-          output = query_with_memory api_key, messages
+          output = query api_key, prompt
         end
         output
       end
-    end
-
-    # Google's Gemini
-    module Gemini
-
     end
 
     # Query a an AI for categorization of each and every item in a given set

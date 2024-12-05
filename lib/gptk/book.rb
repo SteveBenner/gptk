@@ -1,4 +1,7 @@
 module GPTK
+  # Book interface - responsible for managing and creating content in the form of a book with one or more chapters
+  # TODO: add a feature which tracks how many repeated queries are run, and after a time will prompt users to REMOVE
+  # a troublesome AI agent entirely from the Book object, so it won't be used, and assign a different agent its role
   # TODO: update all methods based on latest 0.6 changes and multiple ai agents
   class Book
     $chapters, $outline, $last_output = [], '', nil
@@ -9,6 +12,7 @@ module GPTK
                    openai_client: nil,
                    anthropic_client: nil,
                    xai_api_key: nil,
+                   google_api_key: nil,
                    instructions: '',
                    output_file: '',
                    rec_prompt: '',
@@ -22,6 +26,7 @@ module GPTK
       @chatgpt_client = openai_client
       @claude_client = anthropic_client
       @xai_api_key = xai_api_key
+      @google_api_key = google_api_key
       # Reference document for book generation
       outline = ::File.exist?(outline) ? ::File.read(outline) : outline
       @outline = outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
@@ -48,14 +53,6 @@ module GPTK
     def build_prompt(prompt, fragment_number)
       generation_prompt = (fragment_number == 1) ? CONFIG[:initial_prompt] : CONFIG[:continue_prompt]
       [generation_prompt, prompt].join ' '
-    end
-
-    # Revise the chapter based upon a set of specific guidelines, using ChatGPT
-    def revise_chapter(chapter, recommendations_prompt)
-      puts "Revising chapter..."
-      revision_prompt = "Please revise the following chapter content:\n\n" + chapter + "\n\nREVISIONS:\n" +
-        recommendations_prompt + "\nDo NOT change the chapter title or number--this must remain the same as the original, and must accurately reflect the outline."
-      GPTK::AI.query @chatgpt_client, revision_prompt, @data
     end
 
     # Parse an AI model response text into the chapter content and chapter summary
@@ -137,7 +134,7 @@ module GPTK
 
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
-        puts "Generating fragment #{i}"
+        puts "Generating fragment #{i}..."
 
         if @chatgpt_client
           @chatgpt_client.messages.create(
@@ -176,13 +173,13 @@ module GPTK
         end
 
         # Using Grok
-        chapter << GPTK::AI::Grok.query(xai_api_key, prompt)
+        chapter << "#{GPTK::AI::Grok.query(xai_api_key, prompt)}\n\n"
       end
 
       if @chatgpt_client
         messages
       else
-        chapter
+        chapter.first
       end
     end
 
@@ -240,8 +237,8 @@ module GPTK
 
         if @chatgpt_client
           # Create the Assistant if it does not exist already
-          assistant_id = if @chatgpt_client.first.assistants.list['data'].empty?
-                          response = @chatgpt_client.first.assistants.create(
+          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
+                          response = @chatgpt_client.assistants.create(
                              parameters: {
                                model: GPTK::AI::CONFIG[:openai_gpt_model],
                                name: 'AI Book generator',
@@ -251,16 +248,16 @@ module GPTK
                            )
                            response['id']
                          else
-                           @chatgpt_client.first.assistants.list['data'].first['id']
+                           @chatgpt_client.assistants.list['data'].first['id']
                          end
 
           # Create the Thread
-          response = @chatgpt_client.first.threads.create
+          response = @chatgpt_client.threads.create
           thread_id = response['id']
 
           # Send the AI the book outline for future reference
           prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
-          @chatgpt_client.first.messages.create(
+          @chatgpt_client.messages.create(
             thread_id: thread_id,
             parameters: { role: 'user', content: prompt }
           )
@@ -360,6 +357,14 @@ module GPTK
       chapters
     end
 
+    # Revise the chapter based upon a set of specific guidelines, using ChatGPT
+    def revise_chapter(chapter, recommendations_prompt)
+      puts "Revising chapter..."
+      revision_prompt = "Please revise the following chapter content:\n\n" + chapter + "\n\nREVISIONS:\n" +
+        recommendations_prompt + "\nDo NOT change the chapter title or number--this must remain the same as the original, and must accurately reflect the outline."
+      GPTK::AI.query @chatgpt_client, revision_prompt, @data
+    end
+
     # Revises a chapter fragment-by-fragment, ensuring adherence to specific content rules.
     #
     # This method processes a given chapter, analyzing and revising its content
@@ -402,7 +407,7 @@ module GPTK
     #   - Currently it is NOT thorough, and this is a limitation of the AIs themselves unfortunately.
     #
     # TODO: write 'revise_book' that can take an entire book file and break it down chapter by chapter
-    def revise_chapter1(chapter, chatgpt_client: @chatgpt_client, claude_client: @claude_client, anthropic_api_key: nil)
+    def revise_chapter1(chapter, chatgpt_client: @chatgpt_client, claude_client: @claude_client, anthropic_api_key: nil, xai_api_key: nil)
       start_time = Time.now
       claude_memory = nil
       chapter_text = chapter.instance_of?(String) ? chapter : chapter.join(' ')
@@ -424,14 +429,15 @@ module GPTK
           7. **Overstated or Over-explanatory Passages**: Locate areas where the text feels "spelled out" unnecessarily, where the writing style is overly “telling” the story instead of “showing” it with descriptive narrative.
           8. **Forced Idioms or Sayings**: Highlight awkwardly inserted idiomatic expressions that clash with the tone or context of the writing.
 
-          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output.\n\nCHAPTER:\n\n#{numbered_chapter_text}
+          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to 64 matches total.\n\nCHAPTER:\n\n#{numbered_chapter_text}
         STR
+        puts 'ChatGPT is analyzing the text for bad patterns...'
         chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
-        ap chatgpt_matches
+        puts "... #{chatgpt_matches.count} bad pattern matches detected!"
         claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
           anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
         )
-        ap claude_matches
+        puts 'Claude is analyzing the text for bad patterns...'
         unless claude_matches.instance_of? Array
           claude_matches = if claude_matches.key? 'matches'
                              claude_matches['matches']
@@ -439,8 +445,16 @@ module GPTK
                              claude_matches['patterns']
                            end
         end
+        puts "... #{claude_matches.count} bad pattern matches detected!"
+        puts 'Grok is analyzing the text for bad patterns...'
+        grok_matches = GPTK::AI::Grok.query xai_api_key, bad_pattern_prompt
+        ap grok_matches
+        grok_matches = JSON.parse(grok_matches.gsub(/```json\n|```\n/, ''))
+        ap grok_matches
+        puts "... #{grok_matches.count} bad pattern matches detected!"
 
-        # Remove any duplicate matches from Claude's results (matches already picked up by ChatGPT)
+        # Remove any duplicate matches from Claude's results (matches already picked up by ChatGPT or Grok)
+        puts 'Deleting any duplicate matches found...'
         claude_matches.delete_if do |match|
           chatgpt_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
         end
@@ -449,8 +463,30 @@ module GPTK
             i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count']
           end
         end
+        claude_matches.delete_if do |match|
+          grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+        end
+        claude_matches.delete_if do |match|
+          grok_matches.any { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
+        end
 
-        bad_patterns = chatgpt_matches.uniq.concat claude_matches.uniq
+        # Remove any duplicates from ChatGPT's results (matches already picked up by Claude or Grok)
+        chatgpt_matches.delete_if do |match|
+          claude_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+        end
+        chatgpt_matches.delete_if do |match|
+          claude_matches.any? do |i|
+            i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count']
+          end
+        end
+        chatgpt_matches.delete_if do |match|
+          grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+        end
+        chatgpt_matches.delete_if do |match|
+          grok_matches.any { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
+        end
+
+        bad_patterns = chatgpt_matches.uniq.concat(claude_matches.uniq).concat(grok_matches.uniq)
         # Group the results by match
         bad_patterns = bad_patterns.map { |p| Utils.symbolify_keys p }.group_by { |i| i[:match] }
         # Sort the matches by the order of when they appear in the chapter

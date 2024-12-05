@@ -21,8 +21,13 @@ module GPTK
       anthropic_gpt_model: 'claude-3-5-sonnet-latest',
       anthropic_max_tokens: 1024,
       # Grok only has one available model currently
-      xai_model: 'grok-beta',
-      xai_temperature: 0
+      xai_gpt_model: 'grok-beta',
+      xai_temperature: 0,
+      # Google has 3 AI models available:
+      # - gemini-1.5-flash (fast and versatile)
+      # - gemini-1.5-flash-8b (high volume and lower intelligence)
+      # - gemini-1.5-pro (complex reasoning and more intelligence)
+      google_gpt_model: 'gemini-1.5-flash'
     }
   end
 end
