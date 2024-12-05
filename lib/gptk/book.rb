@@ -431,13 +431,26 @@ module GPTK
 
           ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to 64 matches total.\n\nCHAPTER:\n\n#{numbered_chapter_text}
         STR
-        puts 'ChatGPT is analyzing the text for bad patterns...'
-        chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
-        puts "... #{chatgpt_matches.count} bad pattern matches detected!"
+
+        print 'ChatGPT is analyzing the text for bad patterns...'
+        begin # Retry the query if we get a bad JSON response
+          chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
+        rescue JSON::ParserError => e
+          puts "Error: #{e.class}. Retrying query..."
+          sleep 10
+          chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
+        end
+        puts " #{chatgpt_matches.count} bad pattern matches detected!"
+
+        print 'Grok is analyzing the text for bad patterns...'
+        grok_matches = GPTK::AI::Grok.query xai_api_key, bad_pattern_prompt
+        grok_matches = JSON.parse(grok_matches.gsub /(```json\n)|(\n```)/, '')
+        puts " #{grok_matches.count} bad pattern matches detected!"
+
+        print 'Claude is analyzing the text for bad patterns...'
         claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
           anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
         )
-        puts 'Claude is analyzing the text for bad patterns...'
         unless claude_matches.instance_of? Array
           claude_matches = if claude_matches.key? 'matches'
                              claude_matches['matches']
@@ -445,13 +458,7 @@ module GPTK
                              claude_matches['patterns']
                            end
         end
-        puts "... #{claude_matches.count} bad pattern matches detected!"
-        puts 'Grok is analyzing the text for bad patterns...'
-        grok_matches = GPTK::AI::Grok.query xai_api_key, bad_pattern_prompt
-        ap grok_matches
-        grok_matches = JSON.parse(grok_matches.gsub(/```json\n|```\n/, ''))
-        ap grok_matches
-        puts "... #{grok_matches.count} bad pattern matches detected!"
+        puts " #{claude_matches.count} bad pattern matches detected!"
 
         # Remove any duplicate matches from Claude's results (matches already picked up by ChatGPT or Grok)
         puts 'Deleting any duplicate matches found...'
@@ -467,7 +474,7 @@ module GPTK
           grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
         end
         claude_matches.delete_if do |match|
-          grok_matches.any { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
+          grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
         end
 
         # Remove any duplicates from ChatGPT's results (matches already picked up by Claude or Grok)
@@ -483,7 +490,7 @@ module GPTK
           grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
         end
         chatgpt_matches.delete_if do |match|
-          grok_matches.any { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
+          grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
         end
 
         bad_patterns = chatgpt_matches.uniq.concat(claude_matches.uniq).concat(grok_matches.uniq)

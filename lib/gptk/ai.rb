@@ -21,17 +21,11 @@ module GPTK
       end
       sleep 1 # Important to avoid race conditions and especially token throttling!
       # Return the AI's response message (object deconstruction must be ABSOLUTELY precise!)
-      begin
-        output = if client.instance_of? OpenAI::Client
-                   response.dig 'choices', 0, 'message', 'content'
-                 else # Anthropic Claude
-                   response.dig 'content', 0, 'text'
-                 end
-      rescue => e
-        puts "Error: #{e.class}. Retrying query..."
-        sleep 10
-        output = query client, data, params
-      end
+      output = if client.instance_of? OpenAI::Client
+                 response.dig 'choices', 0, 'message', 'content'
+               else # Anthropic Claude
+                 response.dig 'content', 0, 'text'
+               end
       if output.nil?
         puts 'Error! Null output received from ChatGPT query.'
         until output
@@ -187,6 +181,7 @@ module GPTK
     module Grok
       def self.query(api_key, prompt, system_prompt = nil)
         # Grok manual HTTP API call
+        output = ''
         headers = {
           'Authorization' => "Bearer #{api_key}",
           'content-type' => 'application/json'
@@ -203,12 +198,17 @@ module GPTK
           'temperature': CONFIG[:xai_temperature],
           'messages': messages
         }
-        response = HTTParty.post(
-          'https://api.x.ai/v1/chat/completions',
-          headers: headers,
-          body: body.to_json
-        )
-        ap JSON.parse response.body
+        begin
+          response = HTTParty.post(
+            'https://api.x.ai/v1/chat/completions',
+            headers: headers,
+            body: body.to_json
+          )
+        rescue => e
+          puts "Error: #{e.class}. #{e.message}. Retrying query..."
+          sleep 10
+          return query api_key, prompt
+        end
         # TODO: track data
         # Return text content of the Grok API response
         sleep 1 # Important to avoid race conditions and especially token throttling!
