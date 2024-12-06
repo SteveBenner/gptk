@@ -7,7 +7,7 @@ module GPTK
       num_chapters: num_chapters,
       chapter_fragments: chapter_fragments,
       chapter_fragment_words: chapter_fragment_words,
-      max_total_matches: 64, # Maximum matches to collect when analyzing text
+      max_total_matches: 64, # Maximum bad pattern matches to collect when analyzing text
       initial_prompt: 'Generate the first portion of the current chapter of the story.',
       continue_prompt: 'Continue generating the current chapter of the story, starting from where we left off. Do NOT repeat any previously generated material.',
       prompt: "For the chapter title and content, refer EXPLICITLY to the outline, and if included, the prior chapter summary and current chapter summary. Refer to your context for memory of prior content, as well. Chapter title should be an H1 element SPECIFICALLY (# character in markdown) followed by the chapter name. Chapter titles must match those in the outline EXACTLY. Generate AT LEAST #{chapter_fragment_words} words.",

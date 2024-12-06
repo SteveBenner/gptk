@@ -20,8 +20,8 @@ module GPTK
                    genre: '',
                    parsers: CONFIG[:parsers],
                    mode: GPTK.mode)
-      unless openai_client || anthropic_client || xai_api_key
-        puts 'Error: You must pass in at least ONE AI agent client object to the `new` method.'
+      unless openai_client || anthropic_client || xai_api_key || google_api_key
+        puts 'Error: You must pass in at least ONE AI agent client or API key to the `new` method.'
         return
       end
       @chatgpt_client = openai_client

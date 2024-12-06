@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8
+## 0.8 2024.12.06
 - Generate a book using either of the 4 ALI clients currently incorporated
 - Added API response failure rescue code for Claude
 
