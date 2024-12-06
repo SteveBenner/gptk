@@ -11,6 +11,7 @@ module GPTK
     def initialize(outline,
                    openai_client: nil,
                    anthropic_client: nil,
+                   anthropic_api_key: nil,
                    xai_api_key: nil,
                    google_api_key: nil,
                    instructions: '',
@@ -25,6 +26,7 @@ module GPTK
       end
       @chatgpt_client = openai_client
       @claude_client = anthropic_client
+      @anthropic_api_key = anthropic_api_key
       @xai_api_key = xai_api_key
       @google_api_key = google_api_key
       # Reference document for book generation
@@ -47,7 +49,6 @@ module GPTK
         current_chapter: 1
       }
     end
-    # todo: update non-zipper code to use single client
 
     # Construct the prompt passed to the AI agent
     def build_prompt(prompt, fragment_number)
@@ -128,15 +129,21 @@ module GPTK
     end
 
     # Generate one complete chapter of the book using the given prompt
-    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments], xai_api_key: nil)
+    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
       messages = [] if @chatgpt_client
       chapter = []
+
+      if @claude_client
+        # Initialize claude memory every time we run a chapter generation operation
+        # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
+        claude_memory = { role: 'user', content: [{ type: 'text', text: "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE", cache_control: { type: 'ephemeral' } }] }
+      end
 
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
         puts "Generating fragment #{i}..."
 
-        if @chatgpt_client
+        if @chatgpt_client # Using the Assistant API
           @chatgpt_client.messages.create(
             thread_id: thread_id,
             parameters: { role: 'user', content: prompt }
@@ -159,27 +166,41 @@ module GPTK
               puts 'Processing...'
               sleep 1 # Wait one second and poll again
             when 'completed'
-              messages = @chatgpt_client.messages.list thread_id: thread_id, parameters: { order: 'asc' }
+              messages = @chatgpt_client.messages.list thread_id: thread_id, parameters: { order: 'desc' }
               break # Exit loop and report result to user
             when 'requires_action'
               # Handle tool calls (see below)
             when 'cancelled', 'failed', 'expired'
+              puts 'Error!'
               puts response['last_error'].inspect
               break
             else
               puts "Unknown status response: #{status}"
             end
           end
+          chapter << "#{messages['data'].first['content'].first['text']['value']}\n\n"
         end
 
-        # Using Grok
-        chapter << "#{GPTK::AI::Grok.query(xai_api_key, prompt)}\n\n"
+        if @claude_client
+          claude_messages = [claude_memory, { role: 'user', content: prompt }]
+          claude_fragment = "#{GPTK::AI::Claude.query_with_memory @anthropic_api_key, claude_messages}\n\n"
+          claude_memory[:content].first[:text] << "\n\nFRAGMENT #{i}:\n#{claude_fragment}"
+          chapter << claude_fragment
+        end
+
+        if @xai_api_key
+          chapter << "#{GPTK::AI::Grok.query(@xai_api_key, prompt)}\n\n"
+        end
+
+        if @google_api_key
+          chapter << "#{GPTK::AI::Gemini.query(@google_api_key, prompt)}\n\n"
+        end
       end
 
-      if @chatgpt_client
-        messages
-      else
+      if @xai_api_key
         chapter.first
+      else
+        chapter
       end
     end
 
@@ -225,7 +246,6 @@ module GPTK
     end
 
     # Generate one or more chapters of the book
-    # TODO: update for multiple clients
     def generate(number_of_chapters = CONFIG[:num_chapters])
       CONFIG[:num_chapters] = number_of_chapters
       book = []
@@ -267,15 +287,14 @@ module GPTK
         (1..number_of_chapters).each do |i|
           puts "Generating chapter #{i}..."
           prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
-          book << generate_chapter(prompt, xai_api_key: @xai_api_key)
+          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id)
         end
+
         # Cache result of last operation
-        @last_output = response if @chatgpt_client
+        @last_output = book
 
         # Output useful metadata
         # output_run_info
-        # output_run_info @output_file
-        @@start_time = Time.now
 
         @chatgpt_client.threads.delete(id: thread_id) if @chatgpt_client # Garbage collection
 

@@ -1,6 +1,8 @@
 # Changelog
 
 ## 0.8
+- Generate a book using either of the 4 ALI clients currently incorporated
+- Added API response failure rescue code for Claude
 
 ## 0.7 - 2024.12.05
 - Integrated Grok via `GPTK::AI::Grok` module

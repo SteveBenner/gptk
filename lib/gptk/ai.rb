@@ -152,17 +152,23 @@ module GPTK
           'max_tokens': CONFIG[:anthropic_max_tokens],
           'messages': messages
         }
-        response = HTTParty.post(
-          'https://api.anthropic.com/v1/messages',
-          headers: headers,
-          body: body.to_json
-        )
-        # TODO: track data
-        # Return text content of the Claude API response
+        begin
+          response = HTTParty.post(
+            'https://api.anthropic.com/v1/messages',
+            headers: headers,
+            body: body.to_json
+          )
+          # TODO: track data
+          # Return text content of the Claude API response
+        rescue => e # We want to catch ALL errors, not just those under StandardError
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+          sleep 10
+          output = query_with_memory api_key, messages
+        end
         sleep 1 # Important to avoid race conditions and especially token throttling!
         begin
           output = JSON.parse(response.body).dig 'content', 0, 'text'
-        rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
+        rescue JSON::ParserError => e
           puts "Error: #{e.class}. Retrying query..."
           sleep 10
           output = query_with_memory api_key, messages
