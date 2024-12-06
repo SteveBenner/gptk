@@ -211,7 +211,7 @@ module GPTK
         end
         # TODO: track data
         # Return text content of the Grok API response
-        sleep 1 # Important to avoid race conditions and especially token throttling!
+        sleep 1 # Important to avoid race conditions and token throttling!
         begin
           output = JSON.parse(response.body).dig 'choices', 0, 'message', 'content'
         rescue => e # We want to catch ALL errors, not just those under StandardError
@@ -242,7 +242,7 @@ module GPTK
         )
         # TODO: track data
         # Return text content of the Gemini API response
-        sleep 1 # Important to avoid race conditions and especially token throttling!
+        sleep 1 # Important to avoid race conditions and token throttling!
         begin
           output = JSON.parse(response.body).dig 'candidates', 0, 'content', 'parts', 0, 'text'
         rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
@@ -252,7 +252,7 @@ module GPTK
         end
         if output.nil?
           ap JSON.parse response.body
-          puts 'Error: Gemini API provided an empty response. Retrying query...'
+          puts 'Error: Gemini API provided a bad response. Retrying query...'
           sleep 10
           output = query api_key, prompt
         end

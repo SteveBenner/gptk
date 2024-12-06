@@ -1,7 +1,10 @@
 # Changelog
 
-## 0.7
+## 0.8
+
+## 0.7 - 2024.12.05
 - Integrated Grok via `GPTK::AI::Grok` module
+- Integrated Gemini via `GPTK::AI::Gemini` module
 
 ## 0.6 - 2024.12.04
 - Added `Book::revise_chapter1` which represents a totally new system for interactively revising chapter content, analyzing for bad patterns and then, either altering the text content, removing the match entirely, or simply ignoring the match.
