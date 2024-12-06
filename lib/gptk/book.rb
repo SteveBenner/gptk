@@ -429,7 +429,7 @@ module GPTK
           7. **Overstated or Over-explanatory Passages**: Locate areas where the text feels "spelled out" unnecessarily, where the writing style is overly “telling” the story instead of “showing” it with descriptive narrative.
           8. **Forced Idioms or Sayings**: Highlight awkwardly inserted idiomatic expressions that clash with the tone or context of the writing.
 
-          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to 64 matches total.\n\nCHAPTER:\n\n#{numbered_chapter_text}
+          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to #{CONFIG[:max_total_matches]} matches total, but keep scanning for matches until you reach as close as you can to that number..\n\nCHAPTER:\n\n#{numbered_chapter_text}
         STR
 
         print 'ChatGPT is analyzing the text for bad patterns...'
