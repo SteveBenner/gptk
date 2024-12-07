@@ -436,92 +436,88 @@ module GPTK
         sentences = chapter_text.split /(?<!\.\.\.)(?<!O\.B\.F\.)(?<=\.|!|\?)/ # TODO: fix regex
         numbered_chapter_text = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
 
-        # Scan for bad patterns and generate an Array of results to later parse out of the book content
-        bad_pattern_prompt = <<~STR
-          Analyze the given chapter text exhaustively for the following writing patterns, and output all found matches as a JSON object. Scan for MULTIPLE matches for each pattern. Patterns:
-          1. **Excessive Quotations or Overused Sayings**: Identify instances where quotes, idioms, aphorisms, or platitudes are over-relied upon, leading to a lack of originality in expression.
-          2. **Clichés**: Highlight phrases or expressions that are overly familiar or predictable, diminishing the impact of the prose.
-          3. **Cheesy or Overwrought Descriptions**: Pinpoint descriptions that are overly sentimental, melodramatic, unrefined, or simply using exposé (i.e., “telling” not “showing” the plot advancement).
-          4. **Redundancies**: Detect repetitive ideas, words, or phrases that do not add value or nuance to the text.
-          5. **Pedantic Writing**: Flag passages that feel condescending or patronizing without advancing the narrative or theme.
-          6. **Basic or Unsophisticated Language**: Identify "basic-bitch" tendencies, such as dull word choices, shallow insights, obtuse statements, or oversimplified metaphors.
-          7. **Overstated or Over-explanatory Passages**: Locate areas where the text feels "spelled out" unnecessarily, where the writing style is overly “telling” the story instead of “showing” it with descriptive narrative.
-          8. **Forced Idioms or Sayings**: Highlight awkwardly inserted idiomatic expressions that clash with the tone or context of the writing.
+        # Iterate through all 'bad patterns' and offer the user choice in how to address each one
+        CONFIG[:bad_patterns].each do |pattern, prompt|
+          # Scan for bad patterns and generate an Array of results to later parse out of the book content
+          bad_pattern_prompt = <<~STR
+            Analyze the given chapter text exhaustively for the pattern: (#{pattern}), and output all found matches as a JSON object. #{prompt}
+  
+            ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to #{CONFIG[:max_total_matches]} matches total, but keep scanning for matches until you reach as close as you can to that number..\n\nCHAPTER:\n\n#{numbered_chapter_text}
+          STR
 
-          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to #{CONFIG[:max_total_matches]} matches total, but keep scanning for matches until you reach as close as you can to that number..\n\nCHAPTER:\n\n#{numbered_chapter_text}
-        STR
-
-        print 'ChatGPT is analyzing the text for bad patterns...'
-        begin # Retry the query if we get a bad JSON response
-          chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
-        rescue JSON::ParserError => e
-          puts "Error: #{e.class}. Retrying query..."
-          sleep 10
-          chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
-        end
-        puts " #{chatgpt_matches.count} bad pattern matches detected!"
-
-        print 'Grok is analyzing the text for bad patterns...'
-        grok_matches = GPTK::AI::Grok.query xai_api_key, bad_pattern_prompt
-        grok_matches = JSON.parse(grok_matches.gsub /(```json\n)|(\n```)/, '')
-        puts " #{grok_matches.count} bad pattern matches detected!"
-
-        print 'Claude is analyzing the text for bad patterns...'
-        claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
-          anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
-        )
-        unless claude_matches.instance_of? Array
-          claude_matches = if claude_matches.key? 'matches'
-                             claude_matches['matches']
-                           elsif claude_matches.key? 'patterns'
-                             claude_matches['patterns']
-                           end
-        end
-        puts " #{claude_matches.count} bad pattern matches detected!"
-
-        # Remove any duplicate matches from Claude's results (matches already picked up by ChatGPT or Grok)
-        puts 'Deleting any duplicate matches found...'
-        claude_matches.delete_if do |match|
-          chatgpt_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
-        end
-        claude_matches.delete_if do |match|
-          chatgpt_matches.any? do |i|
-            i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count']
+          print 'ChatGPT is analyzing the text for bad patterns...'
+          begin # Retry the query if we get a bad JSON response
+            chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
+          rescue JSON::ParserError => e
+            puts "Error: #{e.class}. Retrying query..."
+            sleep 10
+            chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, bad_pattern_prompt))['matches']
           end
-        end
-        claude_matches.delete_if do |match|
-          grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
-        end
-        claude_matches.delete_if do |match|
-          grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
-        end
+          puts " #{chatgpt_matches.count} bad pattern matches detected!"
 
-        # Remove any duplicates from ChatGPT's results (matches already picked up by Claude or Grok)
-        chatgpt_matches.delete_if do |match|
-          claude_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
-        end
-        chatgpt_matches.delete_if do |match|
-          claude_matches.any? do |i|
-            i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count']
+          print 'Grok is analyzing the text for bad patterns...'
+          grok_matches = GPTK::AI::Grok.query xai_api_key, bad_pattern_prompt
+          grok_matches = JSON.parse(grok_matches.gsub /(```json\n)|(\n```)/, '')
+          puts " #{grok_matches.count} bad pattern matches detected!"
+
+          print 'Claude is analyzing the text for bad patterns...'
+          claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
+            anthropic_api_key, [{ role: 'user', content: bad_pattern_prompt }]
+          )
+          unless claude_matches.instance_of? Array
+            claude_matches = if claude_matches.key? 'matches'
+                               claude_matches['matches']
+                             elsif claude_matches.key? 'patterns'
+                               claude_matches['patterns']
+                             end
           end
-        end
-        chatgpt_matches.delete_if do |match|
-          grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
-        end
-        chatgpt_matches.delete_if do |match|
-          grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
-        end
+          puts " #{claude_matches.count} bad pattern matches detected!"
 
-        bad_patterns = chatgpt_matches.uniq.concat(claude_matches.uniq).concat(grok_matches.uniq)
-        # Group the results by match
-        bad_patterns = bad_patterns.map { |p| Utils.symbolify_keys p }.group_by { |i| i[:match] }
-        # Sort the matches by the order of when they appear in the chapter
-        bad_patterns.each do |pattern, matches|
-          bad_patterns[pattern] = matches.sort_by { |m| m[:word] }
+          # Remove any duplicate matches from Claude's results (matches already picked up by ChatGPT or Grok)
+          puts 'Deleting any duplicate matches found...'
+          claude_matches.delete_if do |match|
+            chatgpt_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+          end
+          claude_matches.delete_if do |match|
+            chatgpt_matches.any? do |i|
+              i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count']
+            end
+          end
+          claude_matches.delete_if do |match|
+            grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+          end
+          claude_matches.delete_if do |match|
+            grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
+          end
+
+          # Remove any duplicates from ChatGPT's results (matches already picked up by Claude or Grok)
+          chatgpt_matches.delete_if do |match|
+            claude_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+          end
+          chatgpt_matches.delete_if do |match|
+            claude_matches.any? do |i|
+              i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count']
+            end
+          end
+          chatgpt_matches.delete_if do |match|
+            grok_matches.any? { |i| i['match'] == match['match'] && i['sentence_count'] == match['sentence_count'] }
+          end
+          chatgpt_matches.delete_if do |match|
+            grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
+          end
+
+          bad_patterns = chatgpt_matches.uniq.concat(claude_matches.uniq).concat(grok_matches.uniq)
+          # Group the results by match
+          bad_patterns = bad_patterns.map { |p| Utils.symbolify_keys p }.group_by { |i| i[:match] }
+          # Sort the matches by the order of when they appear in the chapter
+          bad_patterns.each do |pattern, matches|
+            bad_patterns[pattern] = matches.sort_by { |m| m[:word] }
+          end
+
         end
 
         # Create a new ChatGPT Thread
-        thread_id = chatgpt_client.threads.create['id']
+        thread_id = chatgpt_client.threads.create['id'] if @chatgpt_client
 
         match_count = bad_patterns.values.flatten.count
         puts "#{bad_patterns.count} bad patterns detected (#{match_count} total matches):"
@@ -708,7 +704,7 @@ module GPTK
         revised = revised_chapter.split /(?<=\.)|(?<=\!)|(?<=\?)/
         numbered_chapter_text = revised.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
       ensure
-        @chatgpt_client.threads.delete id: thread_id # Garbage collection
+        @chatgpt_client.threads.delete id: thread_id if @chatgpt_client # Garbage collection
         @last_output = revised_chapter
         puts "Elapsed time: #{((Time.now - start_time) / 60).round(2)} minutes"
         puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}" if claude_memory
