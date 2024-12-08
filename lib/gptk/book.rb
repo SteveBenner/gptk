@@ -2,10 +2,9 @@ module GPTK
   # Book interface - responsible for managing and creating content in the form of a book with one or more chapters
   # TODO: add a feature which tracks how many repeated queries are run, and after a time will prompt users to REMOVE
   # a troublesome AI agent entirely from the Book object, so it won't be used, and assign a different agent its role
-  # TODO: update all methods based on latest 0.6 changes and multiple ai agents
   class Book
     $chapters, $outline, $last_output = [], '', nil
-    attr_reader :chapters, :chatgpt_client, :claude_client, :last_output
+    attr_reader :chapters, :chatgpt_client, :claude_client, :last_output, :agent
     attr_accessor :parsers, :output_file, :genre, :instructions, :outline
 
     def initialize(outline,
@@ -35,13 +34,22 @@ module GPTK
       # Instructions for the AI agent
       instructions = (::File.exist?(instructions) ? ::File.read(instructions) : instructions) if instructions
       @instructions = instructions.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') if instructions
-      @output_file = ::File.expand_path(output_file) if output_file
+      @output_file = ::File.expand_path output_file if output_file
       @training = ::File.read ::File.expand_path(__FILE__, '../../prompts/trainer-murder-mystery.txt')
       @genre = genre
       @parsers = parsers
       @mode = mode.to_i
       @rec_prompt = (::File.exist?(rec_prompt) ? ::File.read(rec_prompt) : rec_prompt) if rec_prompt
       @chapters = [] # Book content
+      @agent = if @chatgpt_client
+                 'ChatGPT'
+               elsif @claude_client
+                 'Claude'
+               elsif @xai_api_key
+                 'Grok'
+               elsif @google_api_key
+                 'Gemini'
+               end
       @data = { # Data points to track while generating a book chapter by chapter
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -89,47 +97,44 @@ module GPTK
     end
 
     # Output useful information (metadata) after a run, (or part of a run) to STDOUT by default, or a file if given
-    def output_run_info(file=nil)
+    def output_run_info(file = nil)
       io_stream = case file.class
                   when File then file
-                  when IO then ::File.open(file, 'a+')
                   when String then ::File.open(file, 'a+')
+                  when IO then ::File.open(file, 'a+')
                   else STDOUT
                   end
-      puts io_stream.class
       io_stream.seek 0, IO::SEEK_END
-      io_stream.puts "\nSuccessfully generated #{CONFIG[:num_chapters]} chapters, for a total of #{@data[:word_counts].reduce &:+} words.\n"
+      io_stream.puts "\nSuccessfully generated #{CONFIG[:num_chapters]} chapters, for a total of #{@data[:word_counts].reduce(&:+)} words.\n\n"
       io_stream.puts <<~STRING
-
         Total token usage:
-
         - Prompt tokens used: #{@data[:prompt_tokens]}
         - Completion tokens used: #{@data[:completion_tokens]}
         - Total tokens used: #{@data[:prompt_tokens] + @data[:completion_tokens]}
         - Cached tokens used: #{@data[:cached_tokens]}
         - Cached token percentage: #{((@data[:cached_tokens].to_f / @data[:prompt_tokens]) * 100).round 2}%
       STRING
-      io_stream.puts "\nElapsed time: #{((Time.now - @@start_time) / 60).round 1} minutes." # Print script run duration
-      io_stream.puts "Words by chapter:\n"
+      io_stream.puts "\nElapsed time: #{((Time.now - GPTK::START_TIME) / 60).round 1} minutes.\n\n"
+      io_stream.puts "Words by chapter:"
       @data[:word_counts].each_with_index { |chapter_words, i| io_stream.puts "\nChapter #{i + 1}: #{chapter_words} words" }
     end
 
     # Write completed chapters to the output file
-    # todo: add metadata to filename, such as date
     def save
       if @chapters.empty? || @chapters.nil?
         puts 'Error: no content to write.'
         return
       end
-      output_file = ::File.open @output_file, 'w+'
+      filename = GPTK::File.fname_increment "#{@output_file}-#{@agent}#{@agent == 'Grok' ? '.md' : '.txt'}"
+      output_file = ::File.open(filename, 'w+')
       @chapters.each_with_index do |chapter, i|
         puts "Writing chapter #{i + 1} to file..."
-        output_file.puts "#{chapter}\n"
+        output_file.puts chapter.join("\n\n") + "\n\n"
       end
       puts "Successfully wrote #{@chapters.count} chapters to file: #{::File.path output_file}"
     end
 
-    # Generate one complete chapter of the book using the given prompt
+    # Generate one complete chapter of the book using the given prompt, and one AI (auto detects)
     def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
       messages = [] if @chatgpt_client
       chapter = []
@@ -165,12 +170,23 @@ module GPTK
         request_payload.update({ systemInstruction: { parts: [{ text: @instructions }] } }) if @instructions
 
         # Cache the content
-        cache_response = HTTParty.post(
-          "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
-          headers: { 'Content-Type' => 'application/json' },
-          body: request_payload.to_json
-        )
-        cache_response_body = JSON.parse cache_response.body
+        begin
+          cache_response = HTTParty.post(
+            "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
+            headers: { 'Content-Type' => 'application/json' },
+            body: request_payload.to_json
+          )
+          cache_response_body = JSON.parse cache_response.body
+        rescue => e
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+          sleep 10
+          cache_response = HTTParty.post(
+            "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
+            headers: { 'Content-Type' => 'application/json' },
+            body: request_payload.to_json
+          )
+          cache_response_body = JSON.parse cache_response.body
+        end
         cache_name = cache_response_body['name']
 
         # Set up the payload
@@ -182,16 +198,7 @@ module GPTK
 
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
-        agent = if @chatgpt_client
-                  'ChatGPT'
-                elsif @claude_client
-                  'Claude'
-                elsif @xai_api_key
-                  'Grok'
-                elsif @google_api_key
-                  'Gemini'
-                end
-        puts "Generating fragment #{i} using #{agent}..."
+        puts "Generating fragment #{i} using #{@agent}..."
 
         if @chatgpt_client # Using the Assistant API
           @chatgpt_client.messages.create(
@@ -265,12 +272,23 @@ module GPTK
           )
 
           # Create new, updated cache
-          cache_response = HTTParty.post(
-            "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
-            headers: { 'Content-Type' => 'application/json' },
-            body: request_payload.to_json
-          )
-          cache_response_body = JSON.parse cache_response.body
+          begin
+            cache_response = HTTParty.post(
+              "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
+              headers: { 'Content-Type' => 'application/json' },
+              body: request_payload.to_json
+            )
+            cache_response_body = JSON.parse cache_response.body
+          rescue => e
+            puts "Error: #{e.class}: '#{e.message}' Retrying query..."
+            sleep 10
+            cache_response = HTTParty.post(
+              "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
+              headers: { 'Content-Type' => 'application/json' },
+              body: request_payload.to_json
+            )
+            cache_response_body = JSON.parse cache_response.body
+          end
           cache_name = cache_response_body['name']
 
           # Set up the payload again
@@ -288,10 +306,12 @@ module GPTK
         )
       end
 
+      @data[:word_counts] << GPTK::Text.word_count(chapter.join "\n")
+      @chapters << chapter
       chapter
     end
 
-    # Generate one complete chapter of the book using the zipper technique
+    # Generate one complete chapter of the book using the back-and-forth 'zipper' technique
     def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = [], anthropic_api_key: nil)
       # Initialize claude memory every time we run a chapter generation operation
       # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
@@ -329,70 +349,82 @@ module GPTK
                      fragment_text
                    end
       end
+      @chapters << chapter
       chapter # Array of Strings representing chapter fragments for one chapter
     end
 
-    # Generate one or more chapters of the book
-    def generate(number_of_chapters = CONFIG[:num_chapters])
+    # Generate one or more chapters of the book, using a single AI (auto detects)
+    def generate(number_of_chapters = CONFIG[:num_chapters], fragments = CONFIG[:chapter_fragments])
       CONFIG[:num_chapters] = number_of_chapters
       book = []
-      # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
-      case @mode
-      when 1
-        puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long.\n"
-        puts 'Sending initial prompt, and GPT instructions...'
+      begin
+        # Run in mode 1 (Automation), 2 (Interactive), or 3 (Batch)
+        case @mode
+        when 1
+          puts "Automation mode enabled: Generating a novel #{number_of_chapters} chapter(s) long." +
+                 (fragments ? " #{fragments} fragments per chapter." : '')
+          puts 'Sending initial prompt, and GPT instructions...'
 
-        if @chatgpt_client
-          # Create the Assistant if it does not exist already
-          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
-                          response = @chatgpt_client.assistants.create(
-                             parameters: {
-                               model: GPTK::AI::CONFIG[:openai_gpt_model],
-                               name: 'AI Book generator',
-                               description: nil,
-                               instructions: @instructions
-                             }
-                           )
-                           response['id']
-                         else
-                           @chatgpt_client.assistants.list['data'].first['id']
-                         end
+          if @chatgpt_client
+            # Create the Assistant if it does not exist already
+            assistant_id = if @chatgpt_client.assistants.list['data'].empty?
+                            response = @chatgpt_client.assistants.create(
+                               parameters: {
+                                 model: GPTK::AI::CONFIG[:openai_gpt_model],
+                                 name: 'AI Book generator',
+                                 description: nil,
+                                 instructions: @instructions
+                               }
+                             )
+                             response['id']
+                           else
+                             @chatgpt_client.assistants.list['data'].first['id']
+                           end
 
-          # Create the Thread
-          response = @chatgpt_client.threads.create
-          thread_id = response['id']
+            # Create the Thread
+            response = @chatgpt_client.threads.create
+            thread_id = response['id']
 
-          # Send the AI the book outline for future reference
-          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
-          @chatgpt_client.messages.create(
-            thread_id: thread_id,
-            parameters: { role: 'user', content: prompt }
-          )
+            # Send the AI the book outline for future reference
+            prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
+            @chatgpt_client.messages.create(
+              thread_id: thread_id,
+              parameters: { role: 'user', content: prompt }
+            )
+          end
+
+          if @claude_client
+            claude_memory = [] # TODO: complete this
+          end
+
+          # Generate as many chapters as are specified
+          (1..number_of_chapters).each do |i|
+            puts "Generating chapter #{i}..."
+            prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
+            book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments)
+          end
+
+          # Cache result of last operation
+          @last_output = book
+
+          book
+        when 2 # TODO
+        when 3 # TODO
+        else puts 'Please input a valid script run mode.'
         end
-
-        # Generate as many chapters as are specified
-        (1..number_of_chapters).each do |i|
-          puts "Generating chapter #{i}..."
-          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
-          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id)
-        end
-
-        # Cache result of last operation
-        @last_output = book
-
-        # Output useful metadata
-        # output_run_info
-
-        @chatgpt_client.threads.delete(id: thread_id) if @chatgpt_client # Garbage collection
-
-        book
-      when 2 # TODO
-      when 3 # TODO
-      else puts 'Please input a valid script run mode.'
+      ensure
+        @chatgpt_client.threads.delete id: thread_id if @chatgpt_client # Garbage collection
+        # Output some metadata - useful information about the run, API status, book content, etc.
+        output_run_info
+        $chapters = book if $chapters
+        $outline = @outline if $outline
+        $last_output = @last_output if $last_output
+        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}" if claude_memory
       end
     end
 
-    # Generate one or more chapters of the book
+    # Generate one or more chapters of the book using the back-and-forth 'zipper' technique
+    # TODO: consider revising/updating this
     def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1)
       @@start_time = Time.now
       CONFIG[:num_chapters] = number_of_chapters # Update config
@@ -453,13 +485,15 @@ module GPTK
       ensure
         @chatgpt_client.threads.delete id: thread_id # Garbage collection
         # Output some metadata - useful information about the run, API status, book content, etc.
-        $chapters = chapters
-        $outline = @outline
-        $last_output = @last_output
+        output_run_info
+        $chapters = chapters if $chapters
+        $outline = @outline if $outline
+        $last_output = @last_output if $last_output
         puts "Elapsed time: #{((Time.now - @@start_time) / 60).round(2)} minutes"
-        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}"
+        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}" if claude_memory
       end
       puts "Congratulations! Successfully generated #{chapters.count} chapters."
+      @book = chapters
       chapters
     end
 
@@ -524,6 +558,10 @@ module GPTK
         numbered_chapter_text = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
 
         # Iterate through all 'bad patterns' and offer the user choice in how to address each one
+        chatgpt_matches = []
+        claude_matches = []
+        grok_matches = []
+        gemini_matches = []
         CONFIG[:bad_patterns].each do |pattern, prompt|
           # Scan for bad patterns and generate an Array of results to later parse out of the book content
           bad_pattern_prompt = <<~STR
@@ -531,6 +569,8 @@ module GPTK
   
             ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to #{CONFIG[:max_total_matches]} matches total, but keep scanning for matches until you reach as close as you can to that number..\n\nCHAPTER:\n\n#{numbered_chapter_text}
           STR
+
+          # TODO: rewrite the duplicate deletion code to account for all 4 AIs...
 
           print 'ChatGPT is analyzing the text for bad patterns...'
           begin # Retry the query if we get a bad JSON response
@@ -592,15 +632,15 @@ module GPTK
           chatgpt_matches.delete_if do |match|
             grok_matches.any? { |i| i['sentence'] == match['sentence'] && i['sentence_count'] == match['sentence_count'] }
           end
+        end
 
-          bad_patterns = chatgpt_matches.uniq.concat(claude_matches.uniq).concat(grok_matches.uniq)
-          # Group the results by match
-          bad_patterns = bad_patterns.map { |p| Utils.symbolify_keys p }.group_by { |i| i[:match] }
-          # Sort the matches by the order of when they appear in the chapter
-          bad_patterns.each do |pattern, matches|
-            bad_patterns[pattern] = matches.sort_by { |m| m[:word] }
-          end
-
+        # Merge the results of each AI's analysis
+        bad_patterns = chatgpt_matches.uniq.concat(claude_matches.uniq).concat(grok_matches.uniq)
+        # Group the results by match
+        bad_patterns = bad_patterns.map { |p| Utils.symbolify_keys p }.group_by { |i| i[:match] }
+        # Sort the matches by the order of when they appear in the chapter
+        bad_patterns.each do |pattern, matches|
+          bad_patterns[pattern] = matches.sort_by { |m| m[:word] }
         end
 
         # Create a new ChatGPT Thread

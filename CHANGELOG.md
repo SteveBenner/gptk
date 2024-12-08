@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.10
+- Various fixes and code updates
+- FIXED: `Book#save`
+- FIXED: `Book#output_run_info`
 
 ## 0.9 - 2024.12.07
 - New query method `Gemini.query_with_cache` which allows for use of caching

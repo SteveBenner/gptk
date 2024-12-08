@@ -236,7 +236,6 @@ module GPTK
     end
 
     # Google's Gemini
-    # TODO: write `query_with_cache`
     module Gemini
       BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -286,7 +285,7 @@ module GPTK
         begin
           output = JSON.parse(response.body).dig 'candidates', 0, 'content', 'parts', 0, 'text'
         rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
-          puts "Error: #{e.class}: '#{e.message}' Retrying query..."
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
           sleep 10
           output = query_with_cache api_key, body
         end
