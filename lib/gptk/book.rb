@@ -36,6 +36,7 @@ module GPTK
       instructions = ::File.exist?(instructions) ? ::File.read(instructions) : instructions
       @instructions = instructions.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
       @output_file = ::File.expand_path output_file
+      @training = ::File.read ::File.expand_path(__FILE__, '../../prompts/trainer-murder-mystery.txt')
       @genre = genre
       @parsers = parsers
       @mode = mode.to_i
@@ -144,9 +145,10 @@ module GPTK
         general_prompt = "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE\n\n#{general_prompt}"
       end
 
-      # Manage Gemini memory... A son of a gun!
+      # Manage Gemini memory
       if @google_api_key
-        cache_data = Base64.strict_encode64 @outline
+        data = "OUTLINE:\n\n#{@outline}\n\nEND OF OUTLINE\n\nTRAINING DATA:\n\n#{@training}\n\nEND OF TRAINING DATA"
+        cache_data = Base64.strict_encode64 data
         # Ensure min token amount is present in cache object, otherwise it will throw an API error
         chars_to_add = GPTK::AI::CONFIG[:gemini_min_cache_tokens] * 7 - cache_data.size
         if chars_to_add > 0
@@ -158,9 +160,9 @@ module GPTK
               role: 'user',
               parts: [{ inline_data: { mime_type: 'text/plain', data: cache_data } }]
             }],
-          systemInstruction: { parts: [{ text: @instructions }] },
           ttl: CONFIG[:gemini_ttl]
         }
+        request_payload.update({ systemInstruction: { parts: [{ text: @instructions }] } }) if @instructions
 
         # Cache the content
         cache_response = HTTParty.post(
@@ -237,7 +239,8 @@ module GPTK
         end
 
         if @xai_api_key
-          grok_fragment = "#{GPTK::AI::Grok.query(@xai_api_key, prompt)}\n\n"
+          grok_prompt = "#{prompt}\n\nGenerate at least #{CONFIG[:chapter_fragment_words]} words!"
+          grok_fragment = "#{GPTK::AI::Grok.query(@xai_api_key, grok_prompt)}\n\n"
           chapter << grok_fragment
           general_prompt << "\n\nFRAGMENT #{i}:\n\n#{grok_fragment}"
         end
