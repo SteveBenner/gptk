@@ -67,7 +67,9 @@ Provide specific revisions or examples to illustrate these improvements.",
         # add_newlines_before_chapter_titles: /(?<!\n)\n#/
         remove_horizontal_bars: [/\n---\n/, nil],
         remove_extra_newlines_from_start_of_file: [/\n\n(.*)/i, '\1'],
-        remove_chapter_conclusion: [/---\n\n.*chapter*[^-]*---/, nil]
+        remove_chapter_conclusion: [/---\n\n.*chapter*[^-]*---/, nil],
+        # TODO: parse out 'FRAGMENT' instances
+        # TODO: parse out sub headings within fragments
       }
     }
   end

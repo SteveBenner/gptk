@@ -10,7 +10,7 @@ end
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
   START_TIME = Time.now
-  VERSION = '0.9'.freeze
+  VERSION = '0.10'.freeze
   attr_accessor :mode
 
   @mode = ARGV[0] || 0 # The script run mode is set via CLI argument
@@ -26,7 +26,7 @@ module GPTK
   puts 'WARNING: Operating without script mode!' if @mode.zero?
 
   # Benchmarking method to calculate elapsed time since loading the library
-  def self.elapsed_time
-    ((Time.now - START_TIME) / 60).round(2)
+  def self.elapsed_time(start_time = nil)
+    ((Time.now - (start_time || START_TIME)) / 60).round 2
   end
 end

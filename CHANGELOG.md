@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.10
+- Added `Book#revise_chapter2` which is a method for rewriting or removing duplicated content within a chapter
 - Various fixes and code updates
 - FIXED: `Book#save`
 - FIXED: `Book#output_run_info`
