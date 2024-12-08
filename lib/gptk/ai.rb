@@ -211,7 +211,7 @@ module GPTK
             body: body.to_json
           )
         rescue => e
-          puts "Error: #{e.class}. #{e.message}. Retrying query..."
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
           sleep 10
           return query api_key, prompt
         end
@@ -221,7 +221,7 @@ module GPTK
         begin
           output = JSON.parse(response.body).dig 'choices', 0, 'message', 'content'
         rescue => e # We want to catch ALL errors, not just those under StandardError
-          puts "Error: #{e.class}. Retrying query..."
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
           sleep 10
           output = query api_key, messages
         end
@@ -269,18 +269,24 @@ module GPTK
 
       def self.query_with_cache(api_key, body, model = CONFIG[:google_gpt_model])
         # Gemini manual HTTP API call
-        response = HTTParty.post(
-          "#{BASE_URL}/models/#{model}:generateContent?key=#{api_key}",
-          headers: { 'content-type' => 'application/json' },
-          body: body.to_json
-        )
-        # TODO: track data
+        begin
+          response = HTTParty.post(
+            "#{BASE_URL}/models/#{model}:generateContent?key=#{api_key}",
+            headers: { 'content-type' => 'application/json' },
+            body: body.to_json
+          )
+          # TODO: track data
+        rescue => e # We want to catch ALL errors, not just those under StandardError
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+          sleep 10
+          return query_with_cache api_key, body
+        end
         # Return text content of the Gemini API response
         sleep 1 # Important to avoid race conditions and token throttling!
         begin
           output = JSON.parse(response.body).dig 'candidates', 0, 'content', 'parts', 0, 'text'
         rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
-          puts "Error: #{e.class}. Retrying query..."
+          puts "Error: #{e.class}: '#{e.message}' Retrying query..."
           sleep 10
           output = query_with_cache api_key, body
         end

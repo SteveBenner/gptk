@@ -14,10 +14,10 @@ module GPTK
                    anthropic_api_key: nil,
                    xai_api_key: nil,
                    google_api_key: nil,
-                   instructions: '',
-                   output_file: '',
-                   rec_prompt: '',
-                   genre: '',
+                   instructions: nil,
+                   output_file: nil,
+                   rec_prompt: nil,
+                   genre: nil,
                    parsers: CONFIG[:parsers],
                    mode: GPTK.mode)
       unless openai_client || anthropic_client || xai_api_key || google_api_key
@@ -33,14 +33,14 @@ module GPTK
       outline = ::File.exist?(outline) ? ::File.read(outline) : outline
       @outline = outline.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
       # Instructions for the AI agent
-      instructions = ::File.exist?(instructions) ? ::File.read(instructions) : instructions
-      @instructions = instructions.encode 'UTF-8', invalid: :replace, undef: :replace, replace: '?'
-      @output_file = ::File.expand_path output_file
+      instructions = (::File.exist?(instructions) ? ::File.read(instructions) : instructions) if instructions
+      @instructions = instructions.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') if instructions
+      @output_file = ::File.expand_path(output_file) if output_file
       @training = ::File.read ::File.expand_path(__FILE__, '../../prompts/trainer-murder-mystery.txt')
       @genre = genre
       @parsers = parsers
       @mode = mode.to_i
-      @rec_prompt = ::File.exist?(rec_prompt) ? ::File.read(rec_prompt) : rec_prompt
+      @rec_prompt = (::File.exist?(rec_prompt) ? ::File.read(rec_prompt) : rec_prompt) if rec_prompt
       @chapters = [] # Book content
       @data = { # Data points to track while generating a book chapter by chapter
         prompt_tokens: 0,
@@ -239,7 +239,7 @@ module GPTK
         end
 
         if @xai_api_key
-          grok_prompt = "#{prompt}\n\nGenerate at least #{CONFIG[:chapter_fragment_words]} words!"
+          grok_prompt = "#{prompt}\n\nGenerate as much output as you can!"
           grok_fragment = "#{GPTK::AI::Grok.query(@xai_api_key, grok_prompt)}\n\n"
           chapter << grok_fragment
           general_prompt << "\n\nFRAGMENT #{i}:\n\n#{grok_fragment}"
@@ -288,11 +288,7 @@ module GPTK
         )
       end
 
-      if @xai_api_key
-        chapter.first
-      else
-        chapter
-      end
+      chapter
     end
 
     # Generate one complete chapter of the book using the zipper technique
