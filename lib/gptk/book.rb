@@ -133,15 +133,63 @@ module GPTK
       messages = [] if @chatgpt_client
       chapter = []
 
+      # Initialize claude memory every time we run a chapter generation operation
       if @claude_client
-        # Initialize claude memory every time we run a chapter generation operation
         # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
         claude_memory = { role: 'user', content: [{ type: 'text', text: "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE", cache_control: { type: 'ephemeral' } }] }
       end
 
+      # Initialize manual memory for Grok via the input prompt
+      if @xai_api_key
+        general_prompt = "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE\n\n#{general_prompt}"
+      end
+
+      # Manage Gemini memory... A son of a gun!
+      if @google_api_key
+        cache_data = Base64.strict_encode64 @outline
+        # Ensure min token amount is present in cache object, otherwise it will throw an API error
+        chars_to_add = GPTK::AI::CONFIG[:gemini_min_cache_tokens] * 7 - cache_data.size
+        if chars_to_add > 0
+          cache_data = Base64.strict_encode64 "#{'F' * chars_to_add}\n\n#{cache_data}"
+        end
+        request_payload = {
+          model: 'models/gemini-1.5-flash-001',
+          contents: [{
+              role: 'user',
+              parts: [{ inline_data: { mime_type: 'text/plain', data: cache_data } }]
+            }],
+          systemInstruction: { parts: [{ text: @instructions }] },
+          ttl: CONFIG[:gemini_ttl]
+        }
+
+        # Cache the content
+        cache_response = HTTParty.post(
+          "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
+          headers: { 'Content-Type' => 'application/json' },
+          body: request_payload.to_json
+        )
+        cache_response_body = JSON.parse cache_response.body
+        cache_name = cache_response_body['name']
+
+        # Set up the payload
+        payload = {
+          contents: [{ role: 'user', parts: [{ text: general_prompt }] }],
+          cachedContent: cache_name
+        }
+      end
+
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
-        puts "Generating fragment #{i}..."
+        agent = if @chatgpt_client
+                  'ChatGPT'
+                elsif @claude_client
+                  'Claude'
+                elsif @xai_api_key
+                  'Grok'
+                elsif @google_api_key
+                  'Gemini'
+                end
+        puts "Generating fragment #{i} using #{agent}..."
 
         if @chatgpt_client # Using the Assistant API
           @chatgpt_client.messages.create(
@@ -189,12 +237,52 @@ module GPTK
         end
 
         if @xai_api_key
-          chapter << "#{GPTK::AI::Grok.query(@xai_api_key, prompt)}\n\n"
+          grok_fragment = "#{GPTK::AI::Grok.query(@xai_api_key, prompt)}\n\n"
+          chapter << grok_fragment
+          general_prompt << "\n\nFRAGMENT #{i}:\n\n#{grok_fragment}"
         end
 
         if @google_api_key
-          chapter << "#{GPTK::AI::Gemini.query(@google_api_key, prompt)}\n\n"
+          gemini_fragment = "#{GPTK::AI::Gemini.query_with_cache(@google_api_key, payload)}\n\n"
+          chapter << gemini_fragment
+          # Set up the cache with the latest generated chapter fragment added
+          cache_data = Base64.strict_encode64 "\n\nFRAGMENT #{i}:\n\n#{gemini_fragment}#{cache_data}"
+          request_payload = {
+            model: 'models/gemini-1.5-flash-001',
+            contents: [{
+                         role: 'user',
+                         parts: [{ inline_data: { mime_type: 'text/plain', data: cache_data } }]
+                       }],
+            ttl: CONFIG[:gemini_ttl]
+          }
+
+          # Remove old cache
+          HTTParty.post(
+            "https://generativelanguage.googleapis.com/v1beta/#{cache_name}?key=#{@google_api_key}"
+          )
+
+          # Create new, updated cache
+          cache_response = HTTParty.post(
+            "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{@google_api_key}",
+            headers: { 'Content-Type' => 'application/json' },
+            body: request_payload.to_json
+          )
+          cache_response_body = JSON.parse cache_response.body
+          cache_name = cache_response_body['name']
+
+          # Set up the payload again
+          payload = {
+            contents: [{ role: 'user', parts: [{ text: general_prompt }] }],
+            cachedContent: cache_name
+          }
         end
+      end
+
+      if @google_api_key
+        # Remove old cache
+        HTTParty.post(
+          "https://generativelanguage.googleapis.com/v1beta/#{cache_name}?key=#{@google_api_key}"
+        )
       end
 
       if @xai_api_key

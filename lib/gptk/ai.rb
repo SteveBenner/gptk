@@ -236,14 +236,16 @@ module GPTK
     end
 
     # Google's Gemini
+    # TODO: write `query_with_cache`
     module Gemini
-      def self.query(api_key, prompt)
-        # Grok manual HTTP API call
-        headers = { 'content-type' => 'application/json' }
+      BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
+
+      def self.query(api_key, prompt, model = CONFIG[:google_gpt_model])
+        # Gemini manual HTTP API call
         body = { 'contents': [{ 'parts': [{ 'text': prompt }] }] }
         response = HTTParty.post(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=#{api_key}",
-          headers: headers,
+          "#{BASE_URL}/models/#{model}:generateContent?key=#{api_key}",
+          headers: { 'content-type' => 'application/json' },
           body: body.to_json
         )
         # TODO: track data
@@ -261,6 +263,32 @@ module GPTK
           puts 'Error: Gemini API provided a bad response. Retrying query...'
           sleep 10
           output = query api_key, prompt
+        end
+        output
+      end
+
+      def self.query_with_cache(api_key, body, model = CONFIG[:google_gpt_model])
+        # Gemini manual HTTP API call
+        response = HTTParty.post(
+          "#{BASE_URL}/models/#{model}:generateContent?key=#{api_key}",
+          headers: { 'content-type' => 'application/json' },
+          body: body.to_json
+        )
+        # TODO: track data
+        # Return text content of the Gemini API response
+        sleep 1 # Important to avoid race conditions and token throttling!
+        begin
+          output = JSON.parse(response.body).dig 'candidates', 0, 'content', 'parts', 0, 'text'
+        rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
+          puts "Error: #{e.class}. Retrying query..."
+          sleep 10
+          output = query_with_cache api_key, body
+        end
+        if output.nil?
+          ap JSON.parse response.body
+          puts 'Error: Gemini API provided a bad response. Retrying query...'
+          sleep 10
+          output = query_with_cache api_key, body
         end
         output
       end

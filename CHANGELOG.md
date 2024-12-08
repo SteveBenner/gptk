@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.8 2024.12.06
+## 0.10
+
+## 0.9 - 2024.12.07
+- New query method `Gemini.query_with_cache` which allows for use of caching
+
+## 0.8 - 2024.12.06
 - Generate a book using either of the 4 ALI clients currently incorporated
 - Added API response failure rescue code for Claude
 

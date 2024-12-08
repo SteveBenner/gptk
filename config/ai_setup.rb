@@ -27,7 +27,9 @@ module GPTK
       # - gemini-1.5-flash (fast and versatile)
       # - gemini-1.5-flash-8b (high volume and lower intelligence)
       # - gemini-1.5-pro (complex reasoning and more intelligence)
-      google_gpt_model: 'gemini-1.5-flash'
+      google_gpt_model: 'gemini-1.5-flash-001', # Specify 001 to indicate caching feature support
+      gemini_ttl: '300s', # Amount of time cached tokens are stored
+      gemini_min_cache_tokens: 32768 # Number of min tokens required for using caching
     }
   end
 end
