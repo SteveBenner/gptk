@@ -1,5 +1,6 @@
 module GPTK
   # AI interfaces and tools
+  # TODO: add detection of JSON string responses which formats the JSON within the API call method
   module AI
     @last_output = nil # Track the cached output of the latest operation
     def self.last_output

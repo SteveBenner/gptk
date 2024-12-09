@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.10
+## 0.11
+
+## 0.10 - 2024.12.08
 - Added `Book#revise_chapter2` which is a method for rewriting or removing duplicated content within a chapter
 - Various fixes and code updates
 - FIXED: `Book#save`
