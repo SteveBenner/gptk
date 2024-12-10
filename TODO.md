@@ -4,4 +4,4 @@
 - Role-based AI agent client assignment (accommodating 4 AI platform connections!)
 - Document library exhaustively
 - Front-end web interface for the library
-- Finish modes 2 and 3
+- Finish modes 2 and 3 (old)

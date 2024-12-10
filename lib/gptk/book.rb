@@ -871,7 +871,7 @@ module GPTK
         repetitions_prompt = <<~STR
           Analyze the given chapter text for instances of repeated/duplicated content, and output all found matches as a JSON object.
 
-          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE.\n\nCHAPTER:\n\n#{numbered_chapter}
+          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{numbered_chapter}
         STR
 
         if google_api_key
@@ -1059,29 +1059,27 @@ module GPTK
                 revised_chapter.gsub! match[:sentence], revised_sentence
                 puts "Successfully revised the repeated content using #{agent}!"
               when 2 # Prompt user to specify prompt for the AI to use when rewriting the content
-                puts "Please enter a prompt to instruct #{agent} regarding the revision of these bad pattern matches."
+                puts "Please enter a prompt to instruct #{agent} regarding the revision of the repeated content."
                 user_prompt = gets
-                duplicates.each do |match|
-                  prompt = <<~STR
-                    Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion. #{user_prompt}
-                  STR
-                  puts "Revising sentence #{match[:sentence_count]}..."
-                  revised_sentence = case agent
-                                     when 'ChatGPT'
-                                       GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
-                                     when 'Claude'
-                                       GPTK::AI::Claude.query_with_memory anthropic_api_key,
-                                                                          [{ role: 'user', content: prompt }]
-                                     when 'Grok'
-                                       GPTK::AI::Grok.query xai_api_key, prompt
-                                     when 'Gemini'
-                                       GPTK::AI::Gemini.query google_api_key, prompt
-                                     else raise 'Error: No AI agent detected!'
-                                     end
-                  puts "#{agent} revision: '#{revised_sentence}'"
-                  revised_chapter.gsub! match[:sentence], revised_sentence
-                end
-                puts "Successfully revised #{duplicates.count} bad pattern occurrences with your prompt and #{agent}!"
+                prompt = <<~STR
+                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion. #{user_prompt}
+                STR
+                puts "Revising sentence #{match[:sentence_count]}..."
+                revised_sentence = case agent
+                                   when 'ChatGPT'
+                                     GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                                   when 'Claude'
+                                     GPTK::AI::Claude.query_with_memory anthropic_api_key,
+                                                                        [{ role: 'user', content: prompt }]
+                                   when 'Grok'
+                                     GPTK::AI::Grok.query xai_api_key, prompt
+                                   when 'Gemini'
+                                     GPTK::AI::Gemini.query google_api_key, prompt
+                                   else raise 'Error: No AI agent detected!'
+                                   end
+                puts "#{agent} revision: '#{revised_sentence}'"
+                revised_chapter.gsub! match[:sentence], revised_sentence
+                puts "Successfully revised the repeated content using your prompt and #{agent}!"
               else raise 'Invalid option. Must be 1 or 2'
               end
             when 3 # Delete all instances of the bad pattern

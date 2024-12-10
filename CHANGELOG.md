@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.11
+- Finished documenting `Book` module
 
 ## 0.10 - 2024.12.08
 - Added `Book#revise_chapter2` which is a method for rewriting or removing duplicated content within a chapter
