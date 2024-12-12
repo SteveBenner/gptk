@@ -1,10 +1,11 @@
 # TODO:
-- Track token usage
-  - send notifications at specified increments of token usage (count and $ value)
-- Role-based AI agent client assignment (accommodating 4 AI platform connections!)
 - Document library exhaustively
 - Front-end web interface for the library
-- Finish modes 2 and 3 (old)
+- Role-based AI agent client assignment (accommodating 4 AI platform connections!)
+- Finish modes 2 and 3 (old)?
+- Attach a DB and persist data
+- Track token usage
+  - send notifications at specified increments of token usage (count and $ value)
 
 # ROADMAP:
 - Game Writer (more to come later)

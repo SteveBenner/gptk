@@ -2,8 +2,11 @@
 
 ## 0.11
 - Finished documenting `Book` module
-- Added `Text::parse_numbered_categories_with_subcategories` which parses text and outputs a Hash of all the numbered categories and their subcategories and text values
+- Added `Text::parse_numbered_categories` which parses text and outputs a Hash of all the numbered categories and their subcategories and text values
 - COMPLETELY rewrote the revision code. Revised `Book#revise_chapter` so that it is now a single outer proxy for all revision strategies
+- Added `Book#revise_chapter_content` which contains the lower level logic for implementing chapter revisions
+- Added `Book#analyze_text` which is a middle-man for processing text and generating pattern matches for processing.
+- Removed `Book#revise_chapter1` and `Book#revise_chapter2` as they are now merged into `Book#revise_chapter`.
 
 ## 0.10 - 2024.12.08
 - Added `Book#revise_chapter2` which is a method for rewriting or removing duplicated content within a chapter
