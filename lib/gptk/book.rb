@@ -5,7 +5,7 @@ module GPTK
   class Book
     $chapters, $outline, $last_output = [], '', nil
     attr_reader :chapters, :chatgpt_client, :claude_client, :last_output, :agent
-    attr_accessor :parsers, :output_file, :genre, :instructions, :outline
+    attr_accessor :parsers, :output_file, :genre, :instructions, :outline, :training
 
     def initialize(outline,
                    openai_client: nil,
@@ -35,7 +35,7 @@ module GPTK
       instructions = (::File.exist?(instructions) ? ::File.read(instructions) : instructions) if instructions
       @instructions = instructions.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?') if instructions
       @output_file = ::File.expand_path output_file if output_file
-      @training = ::File.read ::File.expand_path(__FILE__, '../../prompts/trainer-murder-mystery.txt')
+      @training = ::File.read ::File.expand_path("#{__FILE__}/../../../prompts/trainer-murder-mystery.txt")
       @genre = genre
       @parsers = parsers
       @mode = mode.to_i
@@ -65,9 +65,9 @@ module GPTK
       [generation_prompt, prompt].join ' '
     end
 
-    # Parse an AI model response text into the chapter content and chapter summary
+    # Parse an AI model response text into the chapter content and chapter summary, as well as applying more parsers
     # Note: due to the tendency of current AI models to produce hallucinations in output, significant
-    # reformatting of the output is required to ensure consistency
+    # reformatting of the output is sometimes required to ensure consistency
     def parse_response(text, parsers = nil)
       # Split the response based on the chapter fragment and the summary (requires Unicode support!)
       parts = text.split(/\n{1,2}\p{Pd}{1,3}|\*{1,3}\s?\n{1,2}/u)
@@ -135,6 +135,7 @@ module GPTK
     end
 
     # Generate one complete chapter of the book using the given prompt, and one AI (auto detects)
+    # TODO: plug in training data
     def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
       messages = [] if @chatgpt_client
       chapter = []
@@ -312,6 +313,7 @@ module GPTK
     end
 
     # Generate one complete chapter of the book using the back-and-forth 'zipper' technique
+    # TODO: plug in training data
     def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = [], anthropic_api_key: nil)
       # Initialize claude memory every time we run a chapter generation operation
       # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
@@ -496,57 +498,455 @@ module GPTK
       chapters
     end
 
-    # Revise the chapter based upon a set of specific guidelines, using ChatGPT
-    def revise_chapter(chapter, recommendations_prompt)
-      puts "Revising chapter..."
-      revision_prompt = "Please revise the following chapter content:\n\n" + chapter + "\n\nREVISIONS:\n" +
-        recommendations_prompt + "\nDo NOT change the chapter title or number--this must remain the same as the original, and must accurately reflect the outline."
-      GPTK::AI.query @chatgpt_client, revision_prompt, @data
+    # TODO: write 'revise_book' that can take an entire book file and break it down chapter by chapter
+
+    # Scan the chapter for instances of given patterns
+    def analyze_text(text, pattern, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+      matches = { chatgpt: [], claude: [], grok: [], gemini: [] }
+      # Scan for repeated content and generate an Array of results to later parse out of the book or rewrite
+      repetitions_prompt = <<~STR
+          Analyze the given chapter text for instances of pattern: '#{pattern}', and output all found matches as a JSON object.
+
+          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{text}
+        STR
+
+      if chatgpt_client
+        print 'ChatGPT is analyzing the text...'
+        begin # Retry the query if we get a bad JSON response
+          matches[:chatgpt] = JSON.parse(GPTK::AI::ChatGPT.query(chatgpt_client, @data, repetitions_prompt))['matches']
+        rescue JSON::ParserError => e
+          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+          sleep 10
+          matches[:chatgpt] = JSON.parse(GPTK::AI::ChatGPT.query(chatgpt_client, @data, repetitions_prompt))
+          ['matches']
+        end
+        puts " #{matches[:chatgpt].count} matches detected!"
+      end
+
+      if anthropic_api_key
+        print 'Claude is analyzing the text...'
+        begin
+          matches[:claude] = JSON.parse GPTK::AI::Claude.query_with_memory(
+            anthropic_api_key, [{ role: 'user', content: repetitions_prompt }]
+          )
+        rescue => e
+          puts "Error: #{e.class}. Retrying query..."
+          sleep 10
+          matches[:claude] = JSON.parse GPTK::AI::Claude.query_with_memory(
+            anthropic_api_key, [{ role: 'user', content: repetitions_prompt }]
+          )
+        end
+        unless matches[:claude].instance_of? Array
+          matches[:claude] = if matches[:claude].key? 'matches'
+                               matches[:claude]['matches']
+                             elsif matches[:claude].key? 'patterns'
+                               matches[:claude]['patterns']
+                             end
+        end
+        puts " #{matches[:claude].count} matches detected!"
+      end
+
+      if xai_api_key
+        print 'Grok is analyzing the text...'
+        matches[:grok] = GPTK::AI::Grok.query xai_api_key, repetitions_prompt
+        matches[:grok] = JSON.parse(matches[:grok].gsub /(```json\n)|(\n```)/, '')
+        puts " #{matches[:grok].count} matches detected!"
+      end
+
+      if google_api_key
+        print 'Gemini is analyzing the text...'
+        begin
+          matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(google_api_key, repetitions_prompt)
+        rescue
+          puts 'Error: Gemini API returned a bad response. Retrying query...'
+          until matches[:gemini] && (matches[:gemini].instance_of?(Array) ? !matches[:gemini].empty? : matches[:gemini].to_i != 0)
+            begin
+              matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(
+                google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
+              )
+            rescue
+              matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(
+                google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
+              )
+            end
+          end
+        end
+        puts " #{matches[:gemini].count} matches detected!"
+      end
+
+      # Merge the results of each AI's analysis
+      matches = matches[:chatgpt].uniq.concat(matches[:claude].uniq)
+                                      .concat(matches[:grok].uniq)
+                                      .concat(matches[:gemini].uniq)
+
+      # Remove any duplicate matches from the merged results
+      puts 'Deleting any duplicate matches found...'
+      matches.delete_if do |d|
+        matches.any? do |i|
+          i != d && (d['match'] == i['match'] && d['sentence_count'] == i['sentence_count'])
+        end
+      end
+      matches.uniq!
+
+      # Symbolify the keys
+      matches.map! { |p| Utils.symbolify_keys p }
+
+      # Sort the matches by the order of when they appear in the chapter
+      matches.sort_by! { |d| d[:sentence_count] }
+
+      # Print out results of the text analysis
+      puts "#{matches.count} total pattern matches found:"
+      matches.each do |i|
+        puts "- [#{i[:sentence_count]}]: #{i[:match]}"
+      end
+
+      matches
     end
 
-    # Revises a chapter fragment-by-fragment, ensuring adherence to specific content rules.
-    #
-    # This method processes a given chapter, analyzing and revising its content
-    # using AI clients such as ChatGPT and Claude. The revisions focus on reducing
-    # the frequency of predefined "bad patterns" and adhering to specific content rules.
-    # The revised chapter is returned as an array of updated fragments.
-    #
-    # @param [Array<String>] chapter
-    #   An array of chapter fragments to be revised. Each fragment is a string
-    #   representing a portion of the chapter.
-    #
-    # @param [Object] chatgpt_client (optional)
-    #   The ChatGPT client instance to use for querying and revisions.
-    #   Defaults to `@chatgpt_client` if not explicitly provided.
-    #
-    # @param [Object] claude_client (optional)
-    #   The Claude client instance for querying and memory management.
-    #   Defaults to `@claude_client` if not explicitly provided.
-    #
-    # @param [String, nil] anthropic_api_key (optional)
-    #   An API key for authenticating requests to the Claude client.
-    #   Defaults to `nil` if not explicitly provided.
-    #
-    # @return [Array<String>]
-    #   The final revised chapter, in two formats: plain text, and numbered (by sentence)
-    #
-    # @example Revise a chapter with ChatGPT and Claude clients
-    #   chapter = [
-    #     "The protagonist's heart raced as they entered the eerie cave.",
-    #     "The air grew thick with tension, and a lion roared in the distance."
-    #   ]
-    #   revised = revise_chapter1(chapter, chatgpt_client: my_chatgpt_client, claude_client: my_claude_client)
-    #   puts revised
-    #
-    # @note
-    #   - The method ensures only one instance of any "bad pattern" appears across the entire chapter.
-    #   - When both clients are provided, the method coordinates their responses, with Claude
-    #     adding contextual revisions to ChatGPT's output.
-    #   - The method handles API interactions, memory updates, and garbage collection for AI threads.
-    #   - Currently it is NOT thorough, and this is a limitation of the AIs themselves unfortunately.
-    #
-    # TODO: write 'revise_book' that can take an entire book file and break it down chapter by chapter
-    def revise_chapter1(chapter, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+    def revise_chapter(chapter, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+      revised_chapter_text = chapter_text = chapter.instance_of?(String) ? chapter : chapter.join(' ')
+      numbered_chapter_text = GPTK::Text.parse_numbered_categories chapter_text
+      args = [chapter_text].concat args[1..-1] # Replace the first argument with chapter_text since we reuse it
+      start_time = Time.now
+      agent = if chatgpt_client
+                'ChatGPT'
+              elsif anthropic_api_key
+                'Claude'
+              elsif xai_api_key
+                'Grok'
+              elsif google_api_key
+                'Gemini'
+              end
+      kw_args = { agent: agent, chatgpt_client: chatgpt_client, anthropic_api_key: anthropic_api_key, xai_api_key: xai_api_key, google_api_key: google_api_key }
+
+      # Compile list of filters
+      num_filters_applied = 0
+      operations = { 'Remove instances of repeated content': ['Repeated or duplicated content'] }
+
+      # Parse bad patterns into operations
+      operations.update CONFIG[:bad_patterns]
+
+      # Parse the filters in the trainers file into operations
+      trainers = GPTK::Text.parse_numbered_categories @training
+      operations.update trainers
+
+      # Loop until the user is finished with revision process
+      response = 1
+      until response.zero?
+        puts "#{operations.count} operations available for text revision. Select one. Input 0 when you are done!"
+        operations.each_with_index do |(filter_name, patterns), i|
+          puts "#{i + 1}) '#{filter_name}' (#{patterns.count} patterns)"
+        end
+        response = gets.to_i
+        args.push response
+
+        if response.zero?
+          puts "Successfully applied #{num_filters_applied} operations!"
+          puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
+          puts 'Exiting...'
+          return revised_chapter_text
+        elsif response == 1 # Repeated content
+          args = [chapter_text, analyze_text(numbered_chapter_text, 'Repeated or duplicated content', **kw_args)]
+        elsif response > 1 && response <= (CONFIG[:bad_patterns].count + 1) # Bad patterns
+          patterns = analyze_text numbered_chapter_text, operations.to_a[response - 1]
+          args = [chapter_text, patterns]
+        else # Trainer
+          args = [chapter_text, patterns]
+        end
+        revised_chapter_text = revise_chapter_content(*args, **kw_args)
+
+        num_filters_applied += 1
+        puts "Revised chapter text:\n\n#{revised_chapter_text}"
+      end
+      puts "Successfully applied #{num_filters_applied} operations!"
+      puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
+      revised_chapter_text
+    end
+
+    def revise_chapter_content(chapter_text, patterns, agent: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+      start_time = Time.now
+      begin
+        numbered_chapter_text = GPTK::Text.number_text chapter_text
+
+        # Scan the chapter for instances of given patterns and offer the user choice in how to address them
+        patterns.each do |pattern, matches|
+
+        end
+      rescue => e
+        puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+        sleep 10
+        revise_chapter_content chapter_text, patterns, agent: agent, chatgpt_client: chatgpt_client,
+                               anthropic_api_key: anthropic_api_key,
+                               xai_api_key: xai_api_key, google_api_key: google_api_key
+      ensure puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
+      end
+    end
+
+    def revise_chapter1(chapter, chatgpt_client: nil, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+      agent = if chatgpt_client
+                'ChatGPT'
+              elsif anthropic_api_key
+                'Claude'
+              elsif xai_api_key
+                'Grok'
+              elsif google_api_key
+                'Gemini'
+              end
+      start_time = Time.now
+      claude_memory = nil
+      chapter_text = chapter.instance_of?(String) ? chapter : chapter.join(' ')
+
+      begin
+        # Give every sentence of the chapter a number, for parsing out repeated content
+        sentences = chapter_text.split /(?<!\.\.\.)(?<!O\.B\.F\.)(?<=\.|!|\?)/ # TODO: fix regex
+        numbered_chapter_text = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
+
+        # Scan the chapter for instances of repeated content and offer the user choice in how to address them
+        matches[:chatgpt] = []
+        matches[:claude] = []
+        matches[:grok] = []
+        matches[:gemini] = []
+        # Scan for repeated content and generate an Array of results to later parse out of the book or rewrite
+        repetitions_prompt = <<~STR
+          Analyze the given chapter text for instances of repeated/duplicated content, and output all found matches as a JSON object.
+
+          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{numbered_chapter_text}
+        STR
+
+        if google_api_key
+          print 'Gemini is analyzing the text for repeated content...'
+          begin
+            gemini_matches = JSON.parse GPTK::AI::Gemini.query(google_api_key, repetitions_prompt)
+          rescue
+            puts 'Error: Gemini API returned a bad response. Retrying query...'
+            until gemini_matches && (gemini_matches.instance_of?(Array) ? !gemini_matches.empty? : gemini_matches.to_i != 0)
+              begin
+                gemini_matches = JSON.parse GPTK::AI::Gemini.query(
+                  google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
+                )
+              rescue
+                gemini_matches = JSON.parse GPTK::AI::Gemini.query(
+                  google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
+                )
+              end
+            end
+          end
+          puts " #{gemini_matches.count} instances detected!"
+        end
+
+        if chatgpt_client
+          print 'ChatGPT is analyzing the text for repeated content...'
+          begin # Retry the query if we get a bad JSON response
+            chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, repetitions_prompt))['matches']
+          rescue JSON::ParserError => e
+            puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+            sleep 10
+            chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, repetitions_prompt))
+              ['matches']
+          end
+          puts " #{chatgpt_matches.count} instances detected!"
+        end
+
+        if anthropic_api_key
+          print 'Claude is analyzing the text for repeated content...'
+          begin
+            claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
+              anthropic_api_key, [{ role: 'user', content: repetitions_prompt }]
+            )
+          rescue => e
+            puts "Error: #{e.class}. Retrying query..."
+            sleep 10
+            claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
+              anthropic_api_key, [{ role: 'user', content: repetitions_prompt }]
+            )
+          end
+          unless claude_matches.instance_of? Array
+            claude_matches = if claude_matches.key? 'matches'
+                               claude_matches['matches']
+                             elsif claude_matches.key? 'patterns'
+                               claude_matches['patterns']
+                             end
+          end
+          puts " #{claude_matches.count} instances detected!"
+        end
+
+        if xai_api_key
+          print 'Grok is analyzing the text for repeated content...'
+          grok_matches = GPTK::AI::Grok.query xai_api_key, repetitions_prompt
+          grok_matches = JSON.parse(grok_matches.gsub /(```json\n)|(\n```)/, '')
+          puts " #{grok_matches.count} instances detected!"
+        end
+
+        # Merge the results of each AI's analysis
+        duplicate_instances = chatgpt_matches.uniq
+                                             .concat(claude_matches.uniq)
+                                             .concat(grok_matches.uniq)
+                                             .concat(gemini_matches.uniq)
+
+        # Remove any duplicate matches from the merged results
+        puts 'Deleting any duplicate matches found...'
+        duplicate_instances.delete_if do |d|
+          duplicate_instances.any? do |i|
+            i != d && (d['match'] == i['match'] && d['sentence_count'] == i['sentence_count'])
+          end
+        end
+        duplicate_instances.uniq!
+
+        # Symbolify the keys
+        duplicate_instances = duplicate_instances.map { |p| Utils.symbolify_keys p }
+
+        # Sort the matches by the order of when they appear in the chapter
+        duplicate_instances.sort_by! { |d| d[:sentence_count] }
+
+        # Print out results of the text analysis
+        puts "#{duplicate_instances.count} instances of repeated content found:"
+        duplicate_instances.each do |i|
+          puts "- [#{i[:sentence_count]}]: #{i[:match]}"
+        end
+
+        # Create a new ChatGPT Thread
+        thread_id = chatgpt_client.threads.create['id'] if agent == 'ChatGPT'
+
+        # Prompt user for the mode
+        puts 'How would you like to proceed with the revision process for the detected instances of repeated content?'
+        puts 'Enter an option number: 1, or 2'
+        puts 'Mode 1: Apply an operation to ALL instances of repeated content at once.'
+        puts 'Mode 2: Iterate through each repeated content instance and choose an operation to apply to it.'
+        mode = gets.to_i
+
+        revised_chapter = chapter_text
+        duplicates = duplicate_instances.uniq.sort_by { |i| i[:sentence_count] }
+        case mode
+        when 1 # Apply operation to ALL matches
+          puts "Which operation do you wish to apply to all #{duplicates.count}? 1) Keep as is, 2) Change, 3) Delete"
+          operation = gets.to_i
+
+          case operation
+          when 1 then puts 'Content accepted as-is.'
+          when 2 # Have the first detected AI revise each instance of repeated content
+            duplicates.each do |match|
+              prompt = <<~STR
+                Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+              STR
+
+              # Revise the chapter text based on AI feedback
+              puts "Revising sentence #{match[:sentence_count]} using #{agent}..."
+              puts "Original: #{match[:sentence]}"
+              revised_sentence = case agent
+                                 when 'ChatGPT'
+                                   GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                                 when 'Claude'
+                                   GPTK::AI::Claude.query_with_memory anthropic_api_key,
+                                                                      [{ role: 'user', content: prompt }]
+                                 when 'Grok'
+                                   GPTK::AI::Grok.query xai_api_key, prompt
+                                 when 'Gemini'
+                                   GPTK::AI::Gemini.query google_api_key, prompt
+                                 else raise 'Error: No AI agent detected!'
+                                 end
+
+              puts "Revision: #{revised_sentence}"
+              sleep 1
+              revised_chapter.gsub! match[:sentence], revised_sentence
+            end
+
+            puts "Successfully enacted #{duplicates.count} revisions!"
+          when 3 # Delete all examples of bad pattern sentences
+            duplicates.each do |match|
+              puts 'Revising chapter...'
+              puts "Sentence [#{match[:sentence_count]}] deleted: #{match[:sentence]}"
+              sleep 1
+              revised_chapter.gsub! match[:sentence], ''
+            end
+          else raise 'Invalid operation. Must be 1, 2, or 3'
+          end
+        when 2 # Iterate through instances of repeated content and prompt the user for action on each one
+          duplicates.each do |match|
+            puts "\nRepeated content: #{match[:match]}"
+            puts "Sentence: #{match[:sentence]}"
+            puts "Sentence number: #{match[:sentence_count]}"
+            puts "Which operation do you wish to apply to the instance of repeated content?"
+            puts '1) Keep as is, 2) Change, or 3) Delete'
+            operation = gets.to_i
+
+            case operation
+            when 1
+              puts "Ignoring repeated content: '#{match[:match]}'..."
+            when 2
+              puts "Would you like to 1) have #{agent} perform a rewrite of the content using its own judgement,"
+              puts "or 2) would you like to provide a general prompt #{agent} will use to revise it?"
+              choice = gets.to_i
+              case choice
+              when 1 # Have the AI auto-revise content
+                prompt = <<~STR
+                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+                STR
+                puts "Revising sentence #{match[:sentence_count]}..."
+                revised_sentence = case agent
+                                   when 'ChatGPT'
+                                     GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                                   when 'Claude'
+                                     GPTK::AI::Claude.query_with_memory anthropic_api_key,
+                                                                        [{ role: 'user', content: prompt }]
+                                   when 'Grok'
+                                     GPTK::AI::Grok.query xai_api_key, prompt
+                                   when 'Gemini'
+                                     GPTK::AI::Gemini.query google_api_key, prompt
+                                   else raise 'Error: No AI agent detected!'
+                                   end
+                puts "#{agent} revision: '#{revised_sentence}'"
+                revised_chapter.gsub! match[:sentence], revised_sentence
+                puts "Successfully revised the repeated content using #{agent}!"
+              when 2 # Prompt user to specify prompt for the AI to use when rewriting the content
+                puts "Please enter a prompt to instruct #{agent} regarding the revision of the repeated content."
+                user_prompt = gets
+                prompt = <<~STR
+                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion. #{user_prompt}
+                STR
+                puts "Revising sentence #{match[:sentence_count]}..."
+                revised_sentence = case agent
+                                   when 'ChatGPT'
+                                     GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
+                                   when 'Claude'
+                                     GPTK::AI::Claude.query_with_memory anthropic_api_key,
+                                                                        [{ role: 'user', content: prompt }]
+                                   when 'Grok'
+                                     GPTK::AI::Grok.query xai_api_key, prompt
+                                   when 'Gemini'
+                                     GPTK::AI::Gemini.query google_api_key, prompt
+                                   else raise 'Error: No AI agent detected!'
+                                   end
+                puts "#{agent} revision: '#{revised_sentence}'"
+                revised_chapter.gsub! match[:sentence], revised_sentence
+                puts "Successfully revised the repeated content using your prompt and #{agent}!"
+              else raise 'Invalid option. Must be 1 or 2'
+              end
+            when 3 # Delete all instances of the bad pattern
+              puts "Deleting sentence #{match[:sentence_count]}..."
+              revised_chapter.gsub! match[:sentence], ''
+              puts "Deleted: '#{match[:sentence]}'"
+            else raise 'Invalid operation. Must be 1, 2, or 3'
+            end
+          end
+        else raise 'Invalid mode. Must be 1, or 2'
+        end
+
+        # Give every sentence of the revised chapter a number, for proofreading and correcting errors later
+        revised = revised_chapter.split /(?<=\.)|(?<=\!)|(?<=\?)/
+        numbered_chapter_text = revised.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
+      ensure
+        @chatgpt_client.threads.delete id: thread_id if @chatgpt_client # Garbage collection
+        @last_output = revised_chapter
+        puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
+        if agent == 'Claude'
+          puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}"
+        end
+      end
+
+      [revised_chapter, numbered_chapter_text]
+    end
+
+    def revise_chapter2(chapter, mode: 1, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
       # TODO: add Gemini code
       start_time = Time.now
       claude_memory = nil
@@ -555,7 +955,7 @@ module GPTK
       begin
         # Give every sentence of the chapter a number, for parsing out bad patterns
         sentences = chapter_text.split /(?<!\.\.\.)(?<!O\.B\.F\.)(?<=\.|!|\?)/ # TODO: fix regex
-        numbered_chapter = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
+        numbered_chapter_text = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
 
         # Iterate through all 'bad patterns' and offer the user choice in how to address each one
         chatgpt_matches = []
@@ -567,7 +967,7 @@ module GPTK
           bad_pattern_prompt = <<~STR
             Analyze the given chapter text exhaustively for the pattern: (#{pattern}), and output all found matches as a JSON object. #{prompt}
   
-            ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to #{CONFIG[:max_total_matches]} matches total, but keep scanning for matches until you reach as close as you can to that number..\n\nCHAPTER:\n\n#{numbered_chapter}
+            ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output proper JSON. Create the following output: an Array of objects which each include: 'match' (the recognized pattern), 'sentence' (the surrounding sentence the pattern was found in) and 'sentence_count' (the number of the sentence the bad pattern was found in). BE EXHAUSTIVE--once you find ONE pattern, do a search for all other matching cases and add those to the output. Restrict output to #{CONFIG[:max_total_matches]} matches total, but keep scanning for matches until you reach as close as you can to that number..\n\nCHAPTER:\n\n#{numbered_chapter_text}
           STR
 
           # TODO: rewrite the duplicate deletion code to account for all 4 AIs...
@@ -829,7 +1229,7 @@ module GPTK
 
         # Give every sentence of the revised chapter a number, for proofreading and correcting errors later
         revised = revised_chapter.split /(?<=\.)|(?<=\!)|(?<=\?)/
-        numbered_chapter = revised.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
+        numbered_chapter_text = revised.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
       ensure
         @chatgpt_client.threads.delete id: thread_id if @chatgpt_client # Garbage collection
         @last_output = revised_chapter
@@ -839,272 +1239,7 @@ module GPTK
         end
       end
 
-      [revised_chapter, numbered_chapter]
-    end
-
-    # This is an alternate chapter revision method for REMOVING DUPLICATE CONTENT ONLY
-    def revise_chapter2(chapter, chatgpt_client: nil, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
-      agent = if chatgpt_client
-                 'ChatGPT'
-               elsif anthropic_api_key
-                 'Claude'
-               elsif xai_api_key
-                 'Grok'
-               elsif google_api_key
-                 'Gemini'
-               end
-      start_time = Time.now
-      claude_memory = nil
-      chapter_text = chapter.instance_of?(String) ? chapter : chapter.join(' ')
-
-      begin
-        # Give every sentence of the chapter a number, for parsing out repeated content
-        sentences = chapter_text.split /(?<!\.\.\.)(?<!O\.B\.F\.)(?<=\.|!|\?)/ # TODO: fix regex
-        numbered_chapter = sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
-
-        # Scan the chapter for instances of repeated content and offer the user choice in how to address them
-        chatgpt_matches = []
-        claude_matches = []
-        grok_matches = []
-        gemini_matches = []
-        # Scan for repeated content and generate an Array of results to later parse out of the book or rewrite
-        repetitions_prompt = <<~STR
-          Analyze the given chapter text for instances of repeated/duplicated content, and output all found matches as a JSON object.
-
-          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{numbered_chapter}
-        STR
-
-        if google_api_key
-          print 'Gemini is analyzing the text for repeated content...'
-          begin
-            gemini_matches = JSON.parse GPTK::AI::Gemini.query(google_api_key, repetitions_prompt)
-          rescue
-            puts 'Error: Gemini API returned a bad response. Retrying query...'
-            until gemini_matches && (gemini_matches.instance_of?(Array) ? !gemini_matches.empty? : gemini_matches.to_i != 0)
-              begin
-                gemini_matches = JSON.parse GPTK::AI::Gemini.query(
-                  google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
-                )
-              rescue
-                gemini_matches = JSON.parse GPTK::AI::Gemini.query(
-                  google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
-                )
-              end
-            end
-          end
-          puts " #{gemini_matches.count} instances detected!"
-        end
-
-        if chatgpt_client
-          print 'ChatGPT is analyzing the text for repeated content...'
-          begin # Retry the query if we get a bad JSON response
-            chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, repetitions_prompt))['matches']
-          rescue JSON::ParserError => e
-            puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
-            sleep 10
-            chatgpt_matches = JSON.parse(GPTK::AI::ChatGPT.query(@chatgpt_client, @data, repetitions_prompt))
-              ['matches']
-          end
-          puts " #{chatgpt_matches.count} instances detected!"
-        end
-
-        if anthropic_api_key
-          print 'Claude is analyzing the text for repeated content...'
-          begin
-            claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
-              anthropic_api_key, [{ role: 'user', content: repetitions_prompt }]
-            )
-          rescue => e
-            puts "Error: #{e.class}. Retrying query..."
-            sleep 10
-            claude_matches = JSON.parse GPTK::AI::Claude.query_with_memory(
-              anthropic_api_key, [{ role: 'user', content: repetitions_prompt }]
-            )
-          end
-          unless claude_matches.instance_of? Array
-            claude_matches = if claude_matches.key? 'matches'
-                               claude_matches['matches']
-                             elsif claude_matches.key? 'patterns'
-                               claude_matches['patterns']
-                             end
-          end
-          puts " #{claude_matches.count} instances detected!"
-        end
-
-        if xai_api_key
-          print 'Grok is analyzing the text for repeated content...'
-          grok_matches = GPTK::AI::Grok.query xai_api_key, repetitions_prompt
-          grok_matches = JSON.parse(grok_matches.gsub /(```json\n)|(\n```)/, '')
-          puts " #{grok_matches.count} instances detected!"
-        end
-
-        # Merge the results of each AI's analysis
-        duplicate_instances = chatgpt_matches.uniq
-                                             .concat(claude_matches.uniq)
-                                             .concat(grok_matches.uniq)
-                                             .concat(gemini_matches.uniq)
-
-        # Remove any duplicate matches from the merged results
-        puts 'Deleting any duplicate matches found...'
-        duplicate_instances.delete_if do |d|
-          duplicate_instances.any? do |i|
-            i != d && (d['match'] == i['match'] && d['sentence_count'] == i['sentence_count'])
-          end
-        end
-        duplicate_instances.uniq!
-
-        # Symbolify the keys
-        duplicate_instances = duplicate_instances.map { |p| Utils.symbolify_keys p }
-
-        # Sort the matches by the order of when they appear in the chapter
-        duplicate_instances.sort_by! { |d| d[:sentence_count] }
-
-        # Print out results of the text analysis
-        puts "#{duplicate_instances.count} instances of repeated content found:"
-        duplicate_instances.each do |i|
-          puts "- [#{i[:sentence_count]}]: #{i[:match]}"
-        end
-
-        # Create a new ChatGPT Thread
-        thread_id = chatgpt_client.threads.create['id'] if agent == 'ChatGPT'
-
-        # Prompt user for the mode
-        puts 'How would you like to proceed with the revision process for the detected instances of repeated content?'
-        puts 'Enter an option number: 1, or 2'
-        puts 'Mode 1: Apply an operation to ALL instances of repeated content at once.'
-        puts 'Mode 2: Iterate through each repeated content instance and choose an operation to apply to it.'
-        mode = gets.to_i
-
-        revised_chapter = chapter_text
-        duplicates = duplicate_instances.uniq.sort_by { |i| i[:sentence_count] }
-        case mode
-        when 1 # Apply operation to ALL matches
-          puts "Which operation do you wish to apply to all #{duplicates.count}? 1) Keep as is, 2) Change, 3) Delete"
-          operation = gets.to_i
-
-          case operation
-          when 1 then puts 'Content accepted as-is.'
-          when 2 # Have the first detected AI revise each instance of repeated content
-            duplicates.each do |match|
-              prompt = <<~STR
-                Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
-              STR
-
-              # Revise the chapter text based on AI feedback
-              puts "Revising sentence #{match[:sentence_count]} using #{agent}..."
-              puts "Original: #{match[:sentence]}"
-              revised_sentence = case agent
-                                 when 'ChatGPT'
-                                   GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
-                                 when 'Claude'
-                                   GPTK::AI::Claude.query_with_memory anthropic_api_key,
-                                                                      [{ role: 'user', content: prompt }]
-                                 when 'Grok'
-                                   GPTK::AI::Grok.query xai_api_key, prompt
-                                 when 'Gemini'
-                                   GPTK::AI::Gemini.query google_api_key, prompt
-                                 else raise 'Error: No AI agent detected!'
-                                 end
-
-              puts "Revision: #{revised_sentence}"
-              sleep 1
-              revised_chapter.gsub! match[:sentence], revised_sentence
-            end
-
-            puts "Successfully enacted #{duplicates.count} revisions!"
-          when 3 # Delete all examples of bad pattern sentences
-            duplicates.each do |match|
-              puts 'Revising chapter...'
-              puts "Sentence [#{match[:sentence_count]}] deleted: #{match[:sentence]}"
-              sleep 1
-              revised_chapter.gsub! match[:sentence], ''
-            end
-          else raise 'Invalid operation. Must be 1, 2, or 3'
-          end
-        when 2 # Iterate through instances of repeated content and prompt the user for action on each one
-          duplicates.each do |match|
-            puts "\nRepeated content: #{match[:match]}"
-            puts "Sentence: #{match[:sentence]}"
-            puts "Sentence number: #{match[:sentence_count]}"
-            puts "Which operation do you wish to apply to the instance of repeated content?"
-            puts '1) Keep as is, 2) Change, or 3) Delete'
-            operation = gets.to_i
-
-            case operation
-            when 1
-              puts "Ignoring repeated content: '#{match[:match]}'..."
-            when 2
-              puts "Would you like to 1) have #{agent} perform a rewrite of the content using its own judgement,"
-              puts "or 2) would you like to provide a general prompt #{agent} will use to revise it?"
-              choice = gets.to_i
-              case choice
-              when 1 # Have the AI auto-revise content
-                prompt = <<~STR
-                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
-                STR
-                puts "Revising sentence #{match[:sentence_count]}..."
-                revised_sentence = case agent
-                                   when 'ChatGPT'
-                                     GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
-                                   when 'Claude'
-                                     GPTK::AI::Claude.query_with_memory anthropic_api_key,
-                                                                        [{ role: 'user', content: prompt }]
-                                   when 'Grok'
-                                     GPTK::AI::Grok.query xai_api_key, prompt
-                                   when 'Gemini'
-                                     GPTK::AI::Gemini.query google_api_key, prompt
-                                   else raise 'Error: No AI agent detected!'
-                                   end
-                puts "#{agent} revision: '#{revised_sentence}'"
-                revised_chapter.gsub! match[:sentence], revised_sentence
-                puts "Successfully revised the repeated content using #{agent}!"
-              when 2 # Prompt user to specify prompt for the AI to use when rewriting the content
-                puts "Please enter a prompt to instruct #{agent} regarding the revision of the repeated content."
-                user_prompt = gets
-                prompt = <<~STR
-                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion. #{user_prompt}
-                STR
-                puts "Revising sentence #{match[:sentence_count]}..."
-                revised_sentence = case agent
-                                   when 'ChatGPT'
-                                     GPTK::AI::ChatGPT.query @chatgpt_client, @data, prompt
-                                   when 'Claude'
-                                     GPTK::AI::Claude.query_with_memory anthropic_api_key,
-                                                                        [{ role: 'user', content: prompt }]
-                                   when 'Grok'
-                                     GPTK::AI::Grok.query xai_api_key, prompt
-                                   when 'Gemini'
-                                     GPTK::AI::Gemini.query google_api_key, prompt
-                                   else raise 'Error: No AI agent detected!'
-                                   end
-                puts "#{agent} revision: '#{revised_sentence}'"
-                revised_chapter.gsub! match[:sentence], revised_sentence
-                puts "Successfully revised the repeated content using your prompt and #{agent}!"
-              else raise 'Invalid option. Must be 1 or 2'
-              end
-            when 3 # Delete all instances of the bad pattern
-              puts "Deleting sentence #{match[:sentence_count]}..."
-              revised_chapter.gsub! match[:sentence], ''
-              puts "Deleted: '#{match[:sentence]}'"
-            else raise 'Invalid operation. Must be 1, 2, or 3'
-            end
-          end
-        else raise 'Invalid mode. Must be 1, or 2'
-        end
-
-        # Give every sentence of the revised chapter a number, for proofreading and correcting errors later
-        revised = revised_chapter.split /(?<=\.)|(?<=\!)|(?<=\?)/
-        numbered_chapter = revised.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
-      ensure
-        @chatgpt_client.threads.delete id: thread_id if @chatgpt_client # Garbage collection
-        @last_output = revised_chapter
-        puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
-        if agent == 'Claude'
-          puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}"
-        end
-      end
-
-      [revised_chapter, numbered_chapter]
+      [revised_chapter, numbered_chapter_text]
     end
   end
 end

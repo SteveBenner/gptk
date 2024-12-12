@@ -10,20 +10,22 @@ end
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
   START_TIME = Time.now
-  VERSION = '0.10'.freeze
-  attr_accessor :mode
+  VERSION = '0.11'.freeze
+  class << self
+    attr_accessor :mode
+  end
 
-  @mode = ARGV[0] || 0 # The script run mode is set via CLI argument
+  self.mode = ARGV[0] || 0 # The script run mode is set via CLI argument
 
-  @mode = @mode.zero? ? 1 : @mode # Default to mode 1
-  abort 'Please provide a valid script mode as an argument (1, 2, or 3)' if @mode && ![1, 2, 3].include?(@mode)
+  self.mode = self.mode.zero? ? 1 : self.mode # Default to mode 1
+  abort 'Please provide a valid script mode as an argument (1, 2, or 3)' if self.mode && ![1, 2, 3].include?(self.mode)
 
   # Load configuration files
   Config.load_openai_setup
   Config.load_book_setup
   puts 'Successfully configured GPTKit.'
 
-  puts 'WARNING: Operating without script mode!' if @mode.zero?
+  puts 'WARNING: Operating without script mode!' if self.mode.zero?
 
   # Benchmarking method to calculate elapsed time since loading the library
   def self.elapsed_time(start_time = nil)
