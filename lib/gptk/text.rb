@@ -16,7 +16,7 @@ module GPTK
       results
     end
 
-    # Parse an enumerated list of categories within a single String into structured data (see EXAMPLE_CATEGORY_TEXT)
+    # Parse an enumerated list of categories within a single String into structured data
     # @param text (String)`` category text
     # @return Hash<Integer => Hash<title: String, description: String>>
     def self.parse_categories_str(text)

@@ -134,6 +134,11 @@ module GPTK
       puts "Successfully wrote #{@chapters.count} chapters to file: #{::File.path output_file}"
     end
 
+    # Output a compiled String version of the book content
+    def to_s
+      @chapters.collect { |chapter| chapter.join }.join("\n\n")
+    end
+
     # Generate one complete chapter of the book using the given prompt, and one AI (auto detects)
     # TODO: plug in training data
     def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
@@ -314,7 +319,7 @@ module GPTK
 
     # Generate one complete chapter of the book using the back-and-forth 'zipper' technique
     # TODO: plug in training data
-    def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = [], anthropic_api_key: nil)
+    def generate_chapter_zipper(parity, chapter_num, thread_id, assistant_id, fragments = GPTK::Book::CONFIG[:chapter_fragments], prev_chapter = [], anthropic_api_key: @anthropic_api_key)
       # Initialize claude memory every time we run a chapter generation operation
       # Ensure `claude_memory` is always an Array with ONE element using cache_control type: 'ephemeral'
       claude_memory = { role: 'user', content: [{ type: 'text', text: "FINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE", cache_control: { type: 'ephemeral' } }] }
@@ -375,7 +380,7 @@ module GPTK
                                parameters: {
                                  model: GPTK::AI::CONFIG[:openai_gpt_model],
                                  name: 'AI Book generator',
-                                 description: nil,
+                                 description: 'AI Book generator',
                                  instructions: @instructions
                                }
                              )
@@ -450,7 +455,7 @@ module GPTK
                              parameters: {
                                model: GPTK::AI::CONFIG[:openai_gpt_model],
                                name: 'AI Book generator',
-                               description: nil,
+                               description: 'AI Book generator',
                                instructions: @instructions
                              }
                            )
@@ -507,14 +512,14 @@ module GPTK
     # TODO: write 'revise_book' that can take an entire book file and break it down chapter by chapter
 
     # Scan the chapter for instances of a given pattern
-    def analyze_text(text, pattern, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+    def analyze_text(text, pattern, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       matches = { chatgpt: [], claude: [], grok: [], gemini: [] }
       # Scan for repeated content and generate an Array of results to later parse out of the book or rewrite
       repetitions_prompt = <<~STR
-          Analyze the given chapter text for instances of pattern: '#{pattern}', and output all found matches as a JSON object.
+        Analyze the given chapter text for instances of pattern: '#{pattern}', and output all found matches as a JSON object.
 
-          ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{text}
-        STR
+        ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{text}
+      STR
 
       if chatgpt_client
         print 'ChatGPT is analyzing the text...'
@@ -609,12 +614,12 @@ module GPTK
       matches
     end
 
-    def revise_chapter(chapter, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
-      # TODO: track revisions internally and return formatted data
+    def revise_chapter(chapter, op: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       # TODO: add method to revert revisions (BY OPERATION)
-      revised_chapter_text = chapter_text = chapter.instance_of?(String) ? chapter : chapter.join(' ')
-      numbered_chapter_text = GPTK::Text.parse_numbered_categories chapter_text
-      args = [chapter_text].concat args[1..-1] # Replace the first argument with chapter_text since we reuse it
+      revised_chapter_text = chapter_text = chapter.instance_of?(String) ? chapter : chapter.join # Array of fragments
+      numbered_chapter_text = GPTK::Text.number_text chapter_text
+      arguments = [numbered_chapter_text]
+      revisions = []
       start_time = Time.now
       agent = if chatgpt_client
                 'ChatGPT'
@@ -639,38 +644,42 @@ module GPTK
       operations.update trainers
 
       # Loop until the user is finished with revision process
-      response = 1
       until response.zero?
-        puts "#{operations.count} operations available for text revision. Select one. Input 0 when you are done!"
-        operations.each_with_index do |(filter_name, op_patterns), i|
-          puts "#{i + 1}) '#{filter_name}' (#{op_patterns.count} patterns)"
-        end
-        response = gets.to_i
+        response = if op
+                     op
+                   else
+                     puts "#{operations.count} operations available for text revision. Select one. Input 0 when you are done!"
+                     operations.each_with_index do |(filter_name, op_patterns), i|
+                       puts "#{i + 1}) '#{filter_name}' (#{op_patterns.count} patterns)"
+                     end
+                     gets.to_i
+                   end
 
-        args = if response.zero?
-                 puts "Successfully applied #{num_filters_applied} operations!"
-                 puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
-                 puts 'Exiting...'
-                 return revised_chapter_text
-               elsif response == 1 # Repeated content
-                 [chapter_text, 'Repeated or duplicated content']
-               elsif response > 1 && response <= (CONFIG[:bad_patterns].count + 1) # Bad patterns
-                 [chapter_text, operations.to_a[response - 1].last]
-               else # Trainer
-                 [chapter_text, operations.to_a[:response - 1].last]
-               end
+        pattern = if response.zero?
+                    puts "Successfully applied #{num_filters_applied} operations!"
+                    puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
+                    puts 'Exiting...'
+                    return [revised_chapter_text, revisions]
+                  elsif response == 1 # Repeated content
+                    'Repeated or duplicated content'
+                  elsif response > 1 && response <= (CONFIG[:bad_patterns].count + 1) # Bad patterns
+                    operations.to_a[response - 1].last
+                  else # Trainer
+                    operations.to_a[:response - 1].last
+                  end
+        arguments << pattern
 
-        revised_chapter_text = revise_chapter_content(*args, **kw_args)
+        revised_chapter_text, revisions = revise_chapter_content(*arguments, **kw_args)
 
         num_filters_applied += 1
         puts "Revised chapter text:\n\n#{revised_chapter_text}"
       end
-      puts "Successfully applied #{num_filters_applied} operations!"
-      puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
-      [revised_chapter_text, numbered_chapter_text]
+
+      [revised_chapter_text, revisions]
     end
 
-    def revise_chapter_content(chapter_text, pattern, agent: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: nil, xai_api_key: nil, google_api_key: nil)
+    # TODO: consider making this private
+    def revise_chapter_content(chapter_text, pattern, agent: @agent, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       kw_args = { agent: agent, chatgpt_client: chatgpt_client, anthropic_api_key: anthropic_api_key, xai_api_key: xai_api_key, google_api_key: google_api_key }
       start_time = Time.now
       revisions = []
@@ -809,7 +818,7 @@ module GPTK
                                      end
                   puts "#{agent} revision: '#{revised_sentence}'"
                   revised_chapter_text.gsub! match[:sentence], revised_sentence
-                  puts "Successfully revised the repeated content using your prompt and #{agent}!"
+                  puts "Successfully revised the the match using your prompt and #{agent}!"
                   revisions << {
                     pattern: pattern,
                     sentence_count: match[:sentence_count],
@@ -834,7 +843,8 @@ module GPTK
           else raise 'Invalid mode. Must be 1, or 2'
           end
         when pattern.instance_of?(Array) # Level 2 operation
-          return pattern.collect { |p| revise_chapter_content chapter_text, p, **kw_args }
+          revisions = pattern.collect { |p| revise_chapter_content chapter_text, p, **kw_args }
+          return [revised_chapter_text, revisions]
         else raise 'Error: invalid pattern object type.'
         end
       rescue => e
@@ -844,7 +854,7 @@ module GPTK
       ensure puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
       end
 
-      [revised_chapter_text, numbered_chapter_text, revisions]
+      [revised_chapter_text, revisions]
     end
   end
 end

@@ -1,6 +1,8 @@
 # Changelog
 
 ## 0.12
+- Minor fixes to v0.11 code
+- Added helper `Book#to_s` which outputs the entire book content in a readable string format.
 
 ## 0.11 - 2024.12.12
 - Finished documenting `Book` module

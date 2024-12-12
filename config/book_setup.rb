@@ -1,7 +1,7 @@
 module GPTK
   class Book
     num_chapters = 12 # BE EXTREMELY CAREFUL SETTING THIS VALUE!!!
-    chapter_fragments = 7 # This determines how many chapter fragments are in a chapter. Larger values = more words.
+    chapter_fragments = 3 # This determines how many chapter fragments are in a chapter. Larger values = more words.
     chapter_fragment_words = 3000 # How large each chapter fragment is
     CONFIG = {
       num_chapters: num_chapters,
