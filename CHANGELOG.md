@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.11
+## 0.12
+
+## 0.11 - 2024.12.12
 - Finished documenting `Book` module
 - Added `Text::parse_numbered_categories` which parses text and outputs a Hash of all the numbered categories and their subcategories and text values
 - COMPLETELY rewrote the revision code. Revised `Book#revise_chapter` so that it is now a single outer proxy for all revision strategies

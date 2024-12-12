@@ -834,15 +834,13 @@ module GPTK
           else raise 'Invalid mode. Must be 1, or 2'
           end
         when pattern.instance_of?(Array) # Level 2 operation
-          pattern.collect { |p| revise_chapter_content chapter_text, p, **kw_args }
+          return pattern.collect { |p| revise_chapter_content chapter_text, p, **kw_args }
         else raise 'Error: invalid pattern object type.'
         end
       rescue => e
         puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
         sleep 10
-        revise_chapter_content chapter_text, pattern, agent: agent, chatgpt_client: chatgpt_client,
-                               anthropic_api_key: anthropic_api_key,
-                               xai_api_key: xai_api_key, google_api_key: google_api_key
+        revise_chapter_content chapter_text, pattern, **kw_args
       ensure puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
       end
 
