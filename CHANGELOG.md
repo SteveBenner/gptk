@@ -1,7 +1,8 @@
 # Changelog
 
 ## 0.12
-- Minor fixes to v0.11 code
+- Multiple fixes and improvements to v0.11 code
+- Added more robust API call failure handling code for Gemini
 - Added helper `Book#to_s` which outputs the entire book content in a readable string format.
 
 ## 0.11 - 2024.12.12

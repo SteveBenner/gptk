@@ -185,6 +185,7 @@ module GPTK
     end
 
     # XAI's Grok
+    # TODO: handle JSON parsing errors
     module Grok
       def self.query(api_key, prompt, system_prompt = nil)
         # Grok manual HTTP API call

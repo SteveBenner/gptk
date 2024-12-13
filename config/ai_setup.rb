@@ -1,6 +1,7 @@
 module GPTK
   module AI
     CONFIG = {
+      bad_api_call_limit: 3, # Maximum number of failed API queries before removing bad API agent
       # Available OpenAI models for use with API:
       # - gpt-4o (high-intelligence flagship model for complex, multi-step tasks.)
       # - gpt-4o-mini (affordable and intelligent small model for fast, lightweight tasks.)

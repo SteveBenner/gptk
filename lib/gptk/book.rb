@@ -50,6 +50,7 @@ module GPTK
                elsif @google_api_key
                  'Gemini'
                end
+      @bad_api_calls = 0
       @data = { # Data points to track while generating a book chapter by chapter
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -142,6 +143,7 @@ module GPTK
     # Generate one complete chapter of the book using the given prompt, and one AI (auto detects)
     # TODO: plug in training data
     def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
+      raise "Error: 'fragments' is nil!" unless fragments
       messages = [] if @chatgpt_client
       chapter = []
 
@@ -521,6 +523,51 @@ module GPTK
         ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{text}
       STR
 
+      # Google comes first because it is the most error-prone
+      if google_api_key
+        print 'Gemini is analyzing the text...'
+        begin
+          matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(google_api_key, repetitions_prompt)
+        rescue
+          puts 'Error: Gemini API returned a bad response. Retrying query...'
+          until matches[:gemini] && (matches[:gemini].instance_of?(Array) ? !matches[:gemini].empty? : matches[:gemini].to_i != 0)
+            begin
+              @bad_api_calls += 1
+              if @bad_api_calls == GPTK::AI::CONFIG[:bad_api_call_limit]
+                @bad_api_calls = 0
+                puts "Warning. It appears repeated attempts to make AI queries using Gemini have failed."
+                puts "Removing Gemini from the list of currently loaded AI agents and continuing..."
+                @google_api_key = nil
+                break
+              end
+              matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(
+                google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
+              )
+            rescue
+              matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(
+                google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
+              )
+            end
+          end
+        end
+        puts " #{matches[:gemini].count} matches detected!" if matches[:gemini]
+      end
+
+      # Grok is the second most error-prone AI
+      if xai_api_key
+        print 'Grok is analyzing the text...'
+        begin
+          matches[:grok] = GPTK::AI::Grok.query xai_api_key, repetitions_prompt
+          matches[:grok] = JSON.parse(matches[:grok].gsub /(```json\n)|(\n```)/, '')
+          puts " #{matches[:grok].count} matches detected!"
+        rescue => e
+          puts "Error: #{e.class}'. Retrying query..."
+          matches[:grok] = GPTK::AI::Grok.query xai_api_key, repetitions_prompt
+          matches[:grok] = JSON.parse(matches[:grok].gsub /(```json\n)|(\n```)/, '')
+          puts " #{matches[:grok].count} matches detected!"
+        end
+      end
+
       if chatgpt_client
         print 'ChatGPT is analyzing the text...'
         begin # Retry the query if we get a bad JSON response
@@ -557,34 +604,6 @@ module GPTK
         puts " #{matches[:claude].count} matches detected!"
       end
 
-      if xai_api_key
-        print 'Grok is analyzing the text...'
-        matches[:grok] = GPTK::AI::Grok.query xai_api_key, repetitions_prompt
-        matches[:grok] = JSON.parse(matches[:grok].gsub /(```json\n)|(\n```)/, '')
-        puts " #{matches[:grok].count} matches detected!"
-      end
-
-      if google_api_key
-        print 'Gemini is analyzing the text...'
-        begin
-          matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(google_api_key, repetitions_prompt)
-        rescue
-          puts 'Error: Gemini API returned a bad response. Retrying query...'
-          until matches[:gemini] && (matches[:gemini].instance_of?(Array) ? !matches[:gemini].empty? : matches[:gemini].to_i != 0)
-            begin
-              matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(
-                google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
-              )
-            rescue
-              matches[:gemini] = JSON.parse GPTK::AI::Gemini.query(
-                google_api_key, "#{repetitions_prompt}\n\nONLY output valid JSON!"
-              )
-            end
-          end
-        end
-        puts " #{matches[:gemini].count} matches detected!"
-      end
-
       # Merge the results of each AI's analysis
       matches = matches[:chatgpt].uniq.concat(matches[:claude].uniq)
                                       .concat(matches[:grok].uniq)
@@ -602,6 +621,13 @@ module GPTK
       # Symbolify the keys
       matches.map! { |p| Utils.symbolify_keys p }
 
+      # Remove duplicate matches for the same sentence (we don't need to rewrite the same sentence multiple times)
+      matches.delete_if do |d|
+        matches.any? do |i|
+          i != d && (d[:sentence_count] == i[:sentence_count])
+        end
+      end
+
       # Sort the matches by the order of when they appear in the chapter
       matches.sort_by! { |d| d[:sentence_count] }
 
@@ -616,7 +642,8 @@ module GPTK
 
     def revise_chapter(chapter, op: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       # TODO: add method to revert revisions (BY OPERATION)
-      revised_chapter_text = chapter_text = chapter.instance_of?(String) ? chapter : chapter.join # Array of fragments
+      chapter_text = chapter.instance_of?(String) ? chapter : chapter.join # Array of fragments
+      revised_chapter_text = ''
       numbered_chapter_text = GPTK::Text.number_text chapter_text
       arguments = [numbered_chapter_text]
       revisions = []
@@ -644,16 +671,23 @@ module GPTK
       operations.update trainers
 
       # Loop until the user is finished with revision process
+      response = 1 # CANNOT BE ZERO
+      iterations_with_op = 0
       until response.zero?
-        response = if op
-                     op
-                   else
-                     puts "#{operations.count} operations available for text revision. Select one. Input 0 when you are done!"
-                     operations.each_with_index do |(filter_name, op_patterns), i|
-                       puts "#{i + 1}) '#{filter_name}' (#{op_patterns.count} patterns)"
-                     end
-                     gets.to_i
-                   end
+        if op
+          response = op
+          iterations_with_op = 1
+        else
+          puts "#{operations.count} operations available for text revision. Select one. Input 0 when you are done!"
+          operations.each_with_index do |(filter_name, op_patterns), i|
+            if op_patterns.instance_of?(String) || op_patterns.count == 1
+              puts "#{i + 1}) '#{filter_name}'"
+            else # Array of patterns
+              puts "#{i + 1}) '#{filter_name}' (#{op_patterns.count} patterns)"
+            end
+          end
+          response = gets.to_i
+        end
 
         pattern = if response.zero?
                     puts "Successfully applied #{num_filters_applied} operations!"
@@ -665,11 +699,19 @@ module GPTK
                   elsif response > 1 && response <= (CONFIG[:bad_patterns].count + 1) # Bad patterns
                     operations.to_a[response - 1].last
                   else # Trainer
-                    operations.to_a[:response - 1].last
+                    operations.to_a[response - 1].last
                   end
         arguments << pattern
 
-        revised_chapter_text, revisions = revise_chapter_content(*arguments, **kw_args)
+        if iterations_with_op.zero?
+          kw_args.update ops: [1, 2]
+          revised_chapter_text, revisions = revise_chapter_content(arguments[0], arguments[1], **kw_args)
+        else
+          kw_args.update ops: [1, 2]
+          revised_chapter_text, revisions = revise_chapter_content(arguments[0], arguments[1], **kw_args)
+          puts 'Exiting...'
+          break
+        end
 
         num_filters_applied += 1
         puts "Revised chapter text:\n\n#{revised_chapter_text}"
@@ -679,7 +721,7 @@ module GPTK
     end
 
     # TODO: consider making this private
-    def revise_chapter_content(chapter_text, pattern, agent: @agent, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
+    def revise_chapter_content(chapter_text, pattern, ops: nil, agent: @agent, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       kw_args = { agent: agent, chatgpt_client: chatgpt_client, anthropic_api_key: anthropic_api_key, xai_api_key: xai_api_key, google_api_key: google_api_key }
       start_time = Time.now
       revisions = []
@@ -689,20 +731,25 @@ module GPTK
       begin
         # Scan the chapter for instances of given pattern and offer the user choice in how to address matches
         case pattern
-        when pattern.instance_of?(String) # Level 1 operation
+        when String # Level 1 operation
+          kw_args.delete :agent
           matches = analyze_text numbered_chapter_text, pattern, **kw_args
 
-          # Prompt user for the mode
-          puts 'How would you like to proceed with the revision process for the pattern matches?'
-          puts 'Enter an option number: 1, or 2'
-          puts 'Mode 1: Apply an operation to ALL matches at once.'
-          puts 'Mode 2: Iterate through each match and choose an operation to apply to it.'
-          mode = gets.to_i
+          unless ops
+            # Prompt user for the mode
+            puts 'How would you like to proceed with the revision process for the pattern matches?'
+            puts 'Enter an option number: 1, or 2'
+            puts 'Mode 1: Apply an operation to ALL matches at once.'
+            puts 'Mode 2: Iterate through each match and choose an operation to apply to it.'
+          end
+          mode = ops ? ops[0] : gets.to_i
 
           case mode
           when 1 # Apply operation to ALL matches
-            puts "Which operation do you wish to apply to all #{matches.count}? 1) Keep as is, 2) Change, 3) Delete"
-            operation = gets.to_i
+            unless ops
+              puts "Which operation do you wish to apply to all #{matches.count}? 1) Keep as is, 2) Change, 3) Delete"
+            end
+            operation = ops ? ops[1] : gets.to_i
 
             case operation
             when 1 then puts 'Content accepted as-is.'
@@ -842,18 +889,22 @@ module GPTK
             end
           else raise 'Invalid mode. Must be 1, or 2'
           end
-        when pattern.instance_of?(Array) # Level 2 operation
-          revisions = pattern.collect { |p| revise_chapter_content chapter_text, p, **kw_args }
+        when Array # Level 2 operation
+          kw_args.update ops: [1, 2]
+          revisions = pattern.collect { |p| revise_chapter_content(chapter_text, p, **kw_args).last }
           return [revised_chapter_text, revisions]
         else raise 'Error: invalid pattern object type.'
         end
       rescue => e
         puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
         sleep 10
-        revise_chapter_content chapter_text, pattern, **kw_args
+        kw_args.update ops: [1, 2]
+        revised_chapter_text, revisions = revise_chapter_content chapter_text, pattern, **kw_args
+        ap revisions
       ensure puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes"
       end
 
+      ap revisions
       [revised_chapter_text, revisions]
     end
   end

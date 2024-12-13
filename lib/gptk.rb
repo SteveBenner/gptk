@@ -10,7 +10,7 @@ end
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
   START_TIME = Time.now
-  VERSION = '0.11.3'.freeze
+  VERSION = '0.11.4'.freeze
   class << self
     attr_accessor :mode
   end
