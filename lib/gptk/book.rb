@@ -404,7 +404,7 @@ module GPTK
           end
 
           # TODO: complete this
-          if agent = 'Claude'
+          if agent == 'Claude'
             claude_memory = []
           end
 
@@ -518,9 +518,7 @@ module GPTK
       matches = { chatgpt: [], claude: [], grok: [], gemini: [] }
       # Scan for repeated content and generate an Array of results to later parse out of the book or rewrite
       repetitions_prompt = <<~STR
-        Analyze the given chapter text for instances of pattern: '#{pattern}', and output all found matches as a JSON object.
-
-        ONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence surrounding the repeated content). ONLY include one instance of integer results in 'sentence_count'; repeat matches if necessary. BE EXHAUSTIVE. Matches must be AT LEAST two words long.\n\nCHAPTER:\n\n#{text}
+        Use the following prompt as a pattern or instructions for analyzing the given text and coming up with matches; output matches as a JSON object. PROMPT: '#{pattern}'.\n\nONLY output the object, no other response text or conversation, and do NOT put it in a Markdown block. ONLY output valid JSON. Create the following output: an Array of objects which each include: 'match' (the recognized repeated content), 'sentence' (the surrounding sentence the pattern was found in), and 'sentence_count' (the number of the sentence where the repeated content begins). ONLY include one instance of integer results in 'sentence_count'. Matches must be AT LEAST two words long.\n\nTEXT:\n\n#{text}
       STR
 
       # Google comes first because it is the most error-prone
@@ -603,60 +601,68 @@ module GPTK
         end
         puts " #{matches[:claude].count} matches detected!"
       end
+      ap matches
 
       # Merge the results of each AI's analysis
-      matches = matches[:chatgpt].uniq.concat(matches[:claude].uniq)
-                                      .concat(matches[:grok].uniq)
-                                      .concat(matches[:gemini].uniq)
+      puts 'Merging results...'
+      # Keep the original matches hash intact
+      final_matches = matches[:chatgpt].uniq # Start with ChatGPT matches
+
+      # Iterate over Claude, Grok, and Gemini matches, merging them into the final_matches array
+      [matches[:claude], matches[:grok], matches[:gemini]].each do |match_list|
+        next unless match_list.is_a? Array # Ensure match_list is an array
+        final_matches.concat match_list.uniq # Add unique elements to final_matches
+      end
+
+      final_matches.uniq! # Ensure all matches are unique in the final array
 
       # Remove any duplicate matches from the merged results
       puts 'Deleting any duplicate matches found...'
-      matches.delete_if do |d|
-        matches.any? do |i|
+      final_matches.delete_if do |d|
+        final_matches.any? do |i|
           i != d && (d['match'] == i['match'] && d['sentence_count'] == i['sentence_count'])
         end
       end
-      matches.uniq!
+      final_matches.uniq!
 
       # Symbolify the keys
-      matches.map! { |p| Utils.symbolify_keys p }
+      final_matches.map! { |p| Utils.symbolify_keys p }
 
       # Remove duplicate matches for the same sentence (we don't need to rewrite the same sentence multiple times)
-      matches.delete_if do |d|
-        matches.any? do |i|
+      final_matches.delete_if do |d|
+        final_matches.any? do |i|
           i != d && (d[:sentence_count] == i[:sentence_count])
         end
       end
 
       # Sort the matches by the order of when they appear in the chapter
-      matches.sort_by! { |d| d[:sentence_count] }
+      final_matches.sort_by! { |d| d[:sentence_count] }
 
       # Print out results of the text analysis
-      puts "#{matches.count} total pattern matches found:"
-      matches.each do |i|
+      puts "#{final_matches.count} total pattern matches found:"
+      final_matches.each do |i|
         puts "- [#{i[:sentence_count]}]: #{i[:match]}"
       end
 
-      matches
+      final_matches
     end
 
-    def revise_chapter(chapter, op: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
+    def revise_chapter(chapter, op: nil, agent: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       # TODO: add method to revert revisions (BY OPERATION)
       chapter_text = chapter.instance_of?(String) ? chapter : chapter.join # Array of fragments
       revised_chapter_text = ''
-      numbered_chapter_text = GPTK::Text.number_text chapter_text
-      arguments = [numbered_chapter_text]
+      arguments = [chapter_text]
       revisions = []
       start_time = Time.now
-      agent = if chatgpt_client
-                'ChatGPT'
-              elsif anthropic_api_key
-                'Claude'
-              elsif xai_api_key
-                'Grok'
-              elsif google_api_key
-                'Gemini'
-              end
+      agent ||= if chatgpt_client
+                  'ChatGPT'
+                elsif anthropic_api_key
+                  'Claude'
+                elsif xai_api_key
+                  'Grok'
+                elsif google_api_key
+                  'Gemini'
+                end
       kw_args = { agent: agent, chatgpt_client: chatgpt_client, anthropic_api_key: anthropic_api_key, xai_api_key: xai_api_key, google_api_key: google_api_key }
 
       # Compile list of filters
@@ -701,7 +707,7 @@ module GPTK
                   else # Trainer
                     operations.to_a[response - 1].last
                   end
-        arguments << pattern
+        arguments << "OPR ##{op}: '#{pattern}'"
 
         if iterations_with_op.zero?
           kw_args.update ops: [1, 2]
@@ -756,7 +762,7 @@ module GPTK
             when 2 # Have the first detected AI revise each pattern match
               matches.each do |match|
                 prompt = <<~STR
-                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}'. ONLY output the revised sentence, no other commentary or discussion.
+                  Rewrite the following sentence: SENTENCE: '#{match[:sentence]}', specifically the pattern: '#{match[:match]}'. ONLY output the revised sentence, no other commentary or discussion. Revise the entire portion of the pattern.
                 STR
 
                 # Revise the chapter text based on AI feedback
@@ -780,6 +786,7 @@ module GPTK
                 revised_chapter_text.gsub! match[:sentence], revised_sentence
                 revisions << {
                   pattern: pattern,
+                  match: match[:match],
                   sentence_count: match[:sentence_count],
                   original: match[:sentence],
                   revised: revised_sentence
@@ -794,6 +801,8 @@ module GPTK
                 sleep 1
                 revised_chapter_text.gsub! match[:sentence], ''
                 revisions << {
+                  pattern: pattern,
+                  match: match[:match],
                   sentence_count: match[:sentence_count],
                   original: match[:sentence],
                   revised: '[DELETED]'
@@ -840,6 +849,7 @@ module GPTK
                   puts "Successfully revised the repeated content using #{agent}!"
                   revisions << {
                     pattern: pattern,
+                    match: match[:match],
                     sentence_count: match[:sentence_count],
                     original: match[:sentence],
                     revised: revised_sentence
@@ -868,6 +878,7 @@ module GPTK
                   puts "Successfully revised the the match using your prompt and #{agent}!"
                   revisions << {
                     pattern: pattern,
+                    match: match[:match],
                     sentence_count: match[:sentence_count],
                     original: match[:sentence],
                     revised: revised_sentence
@@ -880,6 +891,7 @@ module GPTK
                 puts "Deleted: '#{match[:sentence]}'"
                 revisions << {
                   pattern: pattern,
+                  match: match[:match],
                   sentence_count: match[:sentence_count],
                   original: match[:sentence],
                   revised: 'DELETED'
@@ -893,6 +905,8 @@ module GPTK
           kw_args.update ops: [1, 2]
           revisions = pattern.collect { |p| revise_chapter_content(chapter_text, p, **kw_args).last }
           return [revised_chapter_text, revisions]
+        when Hash # Level 2 operation (mad-libs)
+
         else raise 'Error: invalid pattern object type.'
         end
       rescue => e

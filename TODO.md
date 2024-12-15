@@ -1,11 +1,20 @@
 # TODO:
-- Document library exhaustively
+- fix revision text analysis code
+  - look for flipping of original/revised
+- update revision method with a new sub-option 'prompted revision' where user inputs a prompt informing the AI how to revise the content
+- 'post-op' mode where user can pass generated content through additional filters
+- 'mad libs' parsing code
+- colorize & bold revisions output (in the original chapter text)
 - Front-end web interface for the library
 - Role-based AI agent client assignment (accommodating 4 AI platform connections!)
 - Finish modes 2 and 3 (old)?
 - Attach a DB and persist data
 - Track token usage
   - send notifications at specified increments of token usage (count and $ value)
+- Document library exhaustively
+
+### Research:
+- Gemini bad API call results
 
 # ROADMAP:
 - Game Writer (more to come later)

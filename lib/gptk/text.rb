@@ -1,13 +1,35 @@
+require 'pragmatic_segmenter'
+
 module GPTK
   module Text
+
     def self.word_count(text)
       text.split(/\s+/).count
     end
 
     def self.number_text(text)
-      # Give every sentence of given text a number, for performing revisions on the content
-      sentences = text.split /(?<!\.\.\.)(?<!O\.B\.F\.)(?<=\.|!|\?)/
-      sentences.map.with_index { |sentence, i| "**[#{i + 1}]** #{sentence.strip}" }.join(' ')
+      # First, split the text into paragraphs by double newlines
+      paragraphs = text.split(/\n\n+/)
+      sentence_count = 0
+
+      # Process each paragraph separately
+      numbered_paragraphs = paragraphs.map do |paragraph|
+        # Segment each paragraph
+        ps = PragmaticSegmenter::Segmenter.new text: paragraph
+        sentences = ps.segment
+
+        # Number the sentences within the paragraph, incrementing the global count
+        numbered_sentences = sentences.map do |sentence|
+          sentence_count += 1
+          "**[#{sentence_count}]** #{sentence}"
+        end
+
+        # Join the sentences in the paragraph with single spaces
+        numbered_sentences.join(' ')
+      end
+
+      # Join the paragraphs with double newlines
+      numbered_paragraphs.join("\n\n")
     end
 
     def self.parse_numbered_list(text)
@@ -66,6 +88,19 @@ module GPTK
       end
 
       result
+    end
+
+    def self.print_matches(matches)
+      str = "\n## #{matches.first[:pattern]} (#{matches.count} matches)\n\n"
+      matches.each_with_index do |match, i|
+        str << "***MATCH #{i + 1}***:\n\n"
+        str << "- `Sentence number: #{match[:sentence_count]}`\n"
+        str << "- **Match:** #{match[:match]}\n"
+        str << "- **Original sentence:** #{match[:original]}\n"
+        str << "\n\n> **Revised sentence:** #{match[:revised]}\n"
+        str << "\n"
+      end
+      str
     end
   end
 end

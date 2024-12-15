@@ -1,12 +1,18 @@
 # Changelog
 
-## 0.12
+## 0.13
+- Added `Text::print_matches` which prints out pattern matches to markdown.
+- Fixed revision pattern match merge code (it was problematic)
+- Fixed text numbering issue that was causing issues with the revision output
+- Updated `Text::number_text` to use the `pragmatic_segmenter` gem which is FAR superior to attempting to manually parse generated text content, and results is no erroneous numbering of sentences. This fixed numerous issues we were having with text numbering.
+- Modified `Book#revise_chapter` to take an `agent` named parameter to specify the agent you want to use
+
+## 0.12 - 2024.12.12
 - Multiple fixes and improvements to v0.11 code
 - Added more robust API call failure handling code for Gemini
 - Added helper `Book#to_s` which outputs the entire book content in a readable string format.
 
 ## 0.11 - 2024.12.12
-- Finished documenting `Book` module
 - Added `Text::parse_numbered_categories` which parses text and outputs a Hash of all the numbered categories and their subcategories and text values
 - COMPLETELY rewrote the revision code. Revised `Book#revise_chapter` so that it is now a single outer proxy for all revision strategies
 - Added `Book#revise_chapter_content` which contains the lower level logic for implementing chapter revisions

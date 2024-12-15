@@ -29,7 +29,119 @@ module GPTK
         'Introduce or Refine Micro-Events': "Analyze the text for opportunities to introduce or refine small, significant moments—micro-events—that enrich the plot or reveal character quirks. Look for areas where minor interactions, actions, or details could subtly set up major events or add depth to the narrative. Suggest specific micro-events that align with the story's themes, character arcs, or future developments, ensuring they feel organic and purposeful.",
         'Introduce or Refine Macro-Events': "Evaluate the text for opportunities to introduce or refine major plot developments—macro-events—that significantly drive momentum, alter the stakes, or add complexity to the story. Identify areas where the narrative could benefit from a dramatic turning point, such as a war, a groundbreaking discovery, or an unexpected betrayal. Suggest specific macro-events that align with the story's themes and character arcs, ensuring they escalate tension and deepen reader engagement.",
         'Insert, Change, or Remove Plot Devices': "Examine the text for existing plot devices, such as red herrings, McGuffins, or deus ex machina, and evaluate their effectiveness. Identify any devices that feel out of place, overly contrived, or misaligned with the story's tone and credibility. Suggest improvements by refining or replacing these devices, or propose new ones that enhance the plot's cohesion and intrigue while maintaining narrative consistency.",
-        'Tone-Up or -Down Character Traits': "Analyze the characters in the text and evaluate their traits for balance and consistency. Identify opportunities to amplify or minimize aspects of their personality to enhance conflict, create stronger relationships, or add depth. Suggest specific adjustments, such as intensifying stubbornness for tension or softening arrogance to make a character more relatable. Consider how these changes affect dynamics with other characters and the overall story.",
+        'Tone-Up or -Down Character Traits': {
+          text: "Analyze the [1] in the text and evaluate their [2] for balance and consistency. Identify key plot points where [3] can be amplified or minimized to enhance [4]. Gauge the range between the lower end of [5], where the character becomes too believable and risks being boring, and the upper end of [6], where the character becomes too intriguing and risks being unbelievable. Suggest specific adjustments, such as [7] or [8], to create stronger dynamics with [9] and improve the overall story.",
+          libs: {
+            characters: [
+              "Clara Walker",
+              "Dan Cassidy",
+              "O.B.F.",
+              "Candy Sweets",
+              "Percy Atkins Whitaker",
+              "Anthony (Animal Stalls Manager)",
+              "Dave (Lion Tamer)",
+              "Miss Sam (Belly Dancer)",
+              "Nancy (Stage Musician)",
+              "Patrick (Ringmaster’s Assistant)"
+            ],
+            personality_and_character_traits: [
+              "Stubbornness",
+              "Arrogance",
+              "Bravery",
+              "Compassion",
+              "Guilt",
+              "Manipulation",
+              "Ambition",
+              "Paranoia",
+              "Observant nature",
+              "Cryptic behavior"
+            ],
+            specific_personality_traits_or_behaviors: [
+              "Compassion for others",
+              "Ruthlessness in leadership",
+              "Defensive reactions to criticism",
+              "Paranoia about conspiracies",
+              "Guilt over past decisions",
+              "Obsession with public image",
+              "Manipulative charm",
+              "Observant and quiet demeanor",
+              "Courage in dangerous situations",
+              "Overconfidence in abilities"
+            ],
+            story_aspects: [
+              "Conflict",
+              "Relationships",
+              "Mystery resolution",
+              "Depth of character development",
+              "Tension between characters",
+              "Emotional stakes",
+              "Suspense in the investigation",
+              "Hidden motives",
+              "Unraveling past secrets",
+              "Developing trust or mistrust"
+            ],
+            overly_subdued_or_flat_traits: [
+              "Ordinary kindness",
+              "Passive nature",
+              "Practical plainness",
+              "Reluctance to act decisively",
+              "Overly rational thinking",
+              "Unemotional responses",
+              "Over-accommodation of others’ needs",
+              "Modest aspirations",
+              "Lack of imagination",
+              "Excessive self-doubt"
+            ],
+            exaggerated_or_extreme_traits: [
+              "Unrealistic charm",
+              "Obsessive behaviors",
+              "Extreme paranoia",
+              "Over-the-top arrogance",
+              "Reckless impulsiveness",
+              "Uncontrollable temper",
+              "Excessive ambition",
+              "Overbearing confidence",
+              "Incessant manipulation",
+              "Overly cryptic demeanor"
+            ],
+            intensifying_traits_for_effect: [
+              "Intensifying stubbornness for tension",
+              "Heightening defensiveness for conflict",
+              "Amplifying guilt for vulnerability",
+              "Increasing arrogance for dramatic clashes",
+              "Magnifying paranoia to create suspense",
+              "Strengthening compassion to build emotional stakes",
+              "Expanding manipulativeness to create intrigue",
+              "Enhancing bravery to drive critical moments",
+              "Boosting ruthlessness for power struggles",
+              "Heightening ambition to push character goals"
+            ],
+            softening_traits_for_effect: [
+              "Softening arrogance for relatability",
+              "Reducing paranoia for balance",
+              "Moderating defensiveness for trust-building",
+              "Easing ruthlessness for vulnerability",
+              "Lessening cryptic behavior for clarity",
+              "Calming impulsiveness for steadiness",
+              "Softening guilt for redemption arcs",
+              "Tempering manipulation to add sincerity",
+              "Dimming overconfidence to show self-awareness",
+              "Soothing emotional swings for stability"
+            ],
+            specific_other_characters_or_groups: [
+              "Circus troupe",
+              "The rival",
+              "The family",
+              "Esther Cassidy",
+              "O.B.F.",
+              "Percy Atkins Whitaker",
+              "Patrick (Ringmaster’s Assistant)",
+              "Candy Sweets",
+              "Clara’s investigative subjects",
+              "Wilmington townsfolk"
+            ]
+          }
+        },
         'Inject New Characters': "Review the text for opportunities to introduce new characters who can challenge, support, or act as a foil to the protagonist. Suggest potential characters that align with the story’s themes and contribute to plot progression or emotional depth. Provide a brief outline of each new character’s personality, motivations, and role in the narrative, ensuring they have a clear purpose and enhance existing dynamics.",
         'Enhance Dialogue': "Analyze the dialogue in the text to ensure it reflects each character's unique voice, motivations, and relationships. Evaluate opportunities to adjust speech for consistency, tension, humor, or exposition. Use the following 'dials' to refine dialogue:
     • Voice: Highlight or suggest distinct patterns, vocabulary, and quirks that make each character's speech identifiable.
