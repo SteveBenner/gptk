@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.15
+- Added [`README.md`](README.md) (finally).
+- Added [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Updated license to MIT.
 
 ## 0.14 - 2024.12.17
 - Finally retired 'mode' as a general feature of the library (we moved on from initial 3-mode system design long ago)
