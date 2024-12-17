@@ -19,7 +19,6 @@ A powerful and modular library for AI-driven text and book generation, revision,
   - [Core Modules](#core-modules)
   - [Utility Modules](#utility-modules)
   - [Other](#other)
-- [File References](#file-references)
 - [Changelog](#changelog)
 - [Todo](#todo)
 - [Contributing](#contributing)
