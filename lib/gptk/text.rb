@@ -2,33 +2,57 @@ require 'pragmatic_segmenter'
 
 module GPTK
   module Text
-
     def self.word_count(text)
       text.split(/\s+/).count
     end
 
     def self.number_text(text)
-      # First, split the text into paragraphs by double newlines
+      # Split the text into paragraphs by double newlines
       paragraphs = text.split(/\n\n+/)
       sentence_count = 0
 
       # Process each paragraph separately
       numbered_paragraphs = paragraphs.map do |paragraph|
-        # Segment each paragraph
-        ps = PragmaticSegmenter::Segmenter.new text: paragraph
+        # Segment the paragraph into sentences
+        ps = PragmaticSegmenter::Segmenter.new(text: paragraph)
         sentences = ps.segment
 
-        # Number the sentences within the paragraph, incrementing the global count
+        # Process each sentence
         numbered_sentences = sentences.map do |sentence|
+          # Increment sentence count for numbering
           sentence_count += 1
-          "**[#{sentence_count}]** #{sentence}"
+          sentence_label = "**[#{sentence_count}]**"
+
+          # Find all quoted parts in the sentence
+          quoted_parts = sentence.scan(/["“”](.+?)["“”]/).flatten
+          if quoted_parts.any?
+            # Process each quoted part
+            labeled_sub_sentences = quoted_parts.map do |quoted_text|
+              # Split quoted content into sub-sentences and label them alphabetically
+              sub_sentences = PragmaticSegmenter::Segmenter.new(text: quoted_text).segment
+              sub_sentences.each_with_index.map do |sub_sentence, index|
+                "**[#{(index + 65).chr}]** #{sub_sentence.strip}" # A, B, C, etc.
+              end.join(' ') # Join labeled sub-sentences for this quoted part
+            end
+
+            # Replace quoted content with labeled sub-sentences
+            quoted_with_labels = quoted_parts.zip(labeled_sub_sentences).map do |original, labeled|
+              sentence.gsub(/["“”]#{Regexp.escape(original)}["“”]/, "\"#{labeled}\"")
+            end.first # Replace only the first quoted match
+
+            # Return the sentence with main numbering and labeled sub-sentences
+            "#{sentence_label} #{quoted_with_labels}"
+          else
+            # If no quoted content, just label the sentence
+            "#{sentence_label} #{sentence.strip}"
+          end
         end
 
-        # Join the sentences in the paragraph with single spaces
+        # Join the numbered sentences within the paragraph
         numbered_sentences.join(' ')
       end
 
-      # Join the paragraphs with double newlines
+      # Join the numbered paragraphs with double newlines
       numbered_paragraphs.join("\n\n")
     end
 
@@ -91,12 +115,17 @@ module GPTK
     end
 
     def self.print_matches(matches)
-      str = "\n## #{matches.first[:pattern]} (#{matches.count} matches)\n\n"
+      str = if matches.first.key? :pattern
+              "\n## #{matches.first[:pattern]} (#{matches.count} matches)\n\n"
+            else
+              ''
+            end
+
       matches.each_with_index do |match, i|
         str << "***MATCH #{i + 1}***:\n\n"
         str << "- `Sentence number: #{match[:sentence_count]}`\n"
         str << "- **Match:** #{match[:match]}\n"
-        str << "- **Original sentence:** #{match[:original]}\n"
+        str << "- **Original sentence:** #{match[:sentence]}\n"
         str << "\n\n> **Revised sentence:** #{match[:revised]}\n"
         str << "\n"
       end

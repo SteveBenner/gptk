@@ -142,6 +142,7 @@ module GPTK
 
       # Manual HTTP API call
       def self.query_with_memory(api_key, messages)
+        messages = messages.instance_of?(String) ? [{ role: 'user', content: messages }] : messages
         headers = {
           'x-api-key' => api_key,
           'anthropic-version' => '2023-06-01',

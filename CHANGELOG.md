@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.13
+## 0.15
+
+## 0.14 - 2024.12.17
+- Finally retired 'mode' as a general feature of the library (we moved on from initial 3-mode system design long ago)
+- Plugged in 'training' data (a file included in content generation prompts to further inform the output). Training data can be specified in `Book#new` and defaults to a thorough list of included 'trainers'.
+- FINALLY completed thorough documentation of the `Book` module.
+- Modified revision code so as to begin text analysis using numbered chapter text
+- Improved `Text::number_text` so as to be more robust, numbering sub-sentences (sentences within double quotes) as well 
+- Refactored `AI::Claude::query_with_memory` to take either a `String` (single message) or an `Array` of messages
+
+## 0.13 - 2024.12.14
 - Added `Text::print_matches` which prints out pattern matches to markdown.
 - Fixed revision pattern match merge code (it was problematic)
 - Fixed text numbering issue that was causing issues with the revision output
