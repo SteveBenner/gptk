@@ -1,5 +1,11 @@
-
 # GPTK: Generative Prompt Toolkit
+
+# todo:
+- walk them through setting up an AI platform account
+- mention that it's plug-n-play but each have their own requirements
+- add client initialization code
+- add ROADMAP.md
+- emphasize in intro that it's for LONG-form (the groundbreaking part of this)
 
 A powerful and modular library for AI-driven text and book generation, revision, and analysis. With GPTK, you can seamlessly integrate AI tools such as ChatGPT, Claude, Grok, and Gemini for crafting narratives, revising text, and managing content generation workflows.
 
@@ -135,18 +141,13 @@ Handles text processing, including word counting, pattern matching, and list par
 
 - [text.rb](lib/gptk/text.rb)
 
-#### File
-Manages file operations, including filename incrementation.
-
-- [file.rb](lib/gptk/file.rb)
-
 #### Doc
 Generates structured documents based on text and chapter data.
 
 - [doc.rb](lib/gptk/doc.rb)
 
 #### Utils
-Provides helper methods like symbolifying hash keys.
+Provides helper methods like symbolifying hash keys and incrementing filenames.
 
 - [utils.rb](lib/gptk/utils.rb)
 

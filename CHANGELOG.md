@@ -1,14 +1,21 @@
 # Changelog
 
-## 0.15
+**Note:** Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
+
+## 0.16
+
+## 0.15 - 2024.12.18
 - Added [`README.md`](README.md) (finally).
 - Added [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - Updated license to MIT.
+- Minor library code tweaks.
+- COMPLETED documentation of ALL library methods!
+- REMOVED `File` module and moved its single method (`fname_increment`) to the `Utils` module.
 
 ## 0.14 - 2024.12.17
 - Finally retired 'mode' as a general feature of the library (we moved on from initial 3-mode system design long ago)
 - Plugged in 'training' data (a file included in content generation prompts to further inform the output). Training data can be specified in `Book#new` and defaults to a thorough list of included 'trainers'.
-- FINALLY completed thorough documentation of the `Book` module.
+- FINALLY completed thorough documentation of the `Book` class.
 - Modified revision code so as to begin text analysis using numbered chapter text
 - Improved `Text::number_text` so as to be more robust, numbering sub-sentences (sentences within double quotes) as well 
 - Refactored `AI::Claude::query_with_memory` to take either a `String` (single message) or an `Array` of messages
@@ -59,4 +66,4 @@
 
 ## 0.5 - 2024.11.27
 - Revised `Book` to take an Array of clients instead of just one, and updated client code accordingly
-- Added the 'zipper' technique to the `Book` module, including the `::generate_zipper` and `::generate_chapter_zipper` methods which implement a back-and-forth means of generating content utilizing one or more AI's instead of just one.
+- Added the 'zipper' technique to the `Book` class, including the `generate_zipper` and `generate_chapter_zipper` methods which implement a back-and-forth means of generating content utilizing one or more AI's instead of just one.

@@ -14,18 +14,18 @@ module GPTK
   #   Stores the last generated output, typically the most recently generated chapters.
   # @attr_reader [String] agent
   #   The name of the AI agent currently being used.
-  # @attr_accessor [Hash] parsers
-  #   Stores parser configurations for text processing and analysis.
-  # @attr_accessor [String, nil] output_file
-  #   The file path to save the generated chapters.
-  # @attr_accessor [String] genre
-  #   The genre of the novel being generated.
-  # @attr_accessor [String, nil] instructions
-  #   Instructions or contextual guidance for the AI agent.
-  # @attr_accessor [String] outline
-  #   The outline for the novel, used as a reference for generating content.
-  # @attr_accessor [String] training
-  #   Training data or examples used to guide AI-generated content.
+  # @!attribute [rw] parsers
+  #   @return [Hash] Stores parser configurations for text processing and analysis.
+  # @!attribute [rw] output_file
+  #   @return [String, nil] The file path to save the generated chapters.
+  # @!attribute [rw] genre
+  #   @return [String] The genre of the novel being generated.
+  # @!attribute [rw] instructions
+  #   @return [String, nil] Instructions or contextual guidance for the AI agent.
+  # @!attribute [rw] outline
+  #   @return [String] The outline for the novel, used as a reference for generating content.
+  # @!attribute [rw] training
+  #   @return [String] Training data or examples used to guide AI-generated content.
   #
   # @note
   #   This class supports dynamic interactions with multiple AI agents and handles retries for failed API requests.
@@ -54,9 +54,9 @@ module GPTK
     #
     # @param [String] outline
     #   The outline for the novel. Can be a file path or plain text.
-    # @param [Object, nil] openai_client
+    # @param [Object, nil] chatgpt_client
     #   The client object for ChatGPT. Default: `nil`.
-    # @param [Object, nil] anthropic_client
+    # @param [Object, nil] claude_client
     #   The client object for Claude. Default: `nil`.
     # @param [String, nil] anthropic_api_key
     #   The API key for accessing Claude. Default: `nil`.
@@ -82,13 +82,13 @@ module GPTK
     # @example Initializing the `Book` class
     #   book = Book.new(
     #     "path/to/outline.txt",
-    #     openai_client: chatgpt_instance,
-    #     anthropic_client: claude_instance,
+    #     chatgpt_client: chatgpt_instance,
+    #     claude_client: claude_instance,
     #     genre: "science fiction"
     #   )
     def initialize(outline,
-                   openai_client: nil,
-                   anthropic_client: nil,
+                   chatgpt_client: nil,
+                   claude_client: nil,
                    anthropic_api_key: nil,
                    xai_api_key: nil,
                    google_api_key: nil,
@@ -97,12 +97,12 @@ module GPTK
                    rec_prompt: nil,
                    genre: nil,
                    parsers: CONFIG[:parsers])
-      unless openai_client || anthropic_client || xai_api_key || google_api_key
+      unless chatgpt_client || claude_client || xai_api_key || google_api_key
         puts 'Error: You must pass in at least ONE AI agent client or API key to the `new` method.'
         return
       end
-      @chatgpt_client = openai_client
-      @claude_client = anthropic_client
+      @chatgpt_client = chatgpt_client
+      @claude_client = claude_client
       @anthropic_api_key = anthropic_api_key
       @xai_api_key = xai_api_key
       @google_api_key = google_api_key
@@ -135,50 +135,6 @@ module GPTK
         word_counts: [],
         current_chapter: 1
       }
-    end
-
-    # Builds a generation prompt based on the fragment number and a provided base prompt.
-    #
-    # This method constructs a complete prompt for generating chapter fragments, selecting a predefined
-    # generation template based on whether the fragment is the first one or a continuation.
-    #
-    # @param [String] prompt
-    #   The base prompt to guide content generation. This typically includes context or specific instructions.
-    #
-    # @param [Integer] fragment_number
-    #   The fragment number to determine which generation template to use:
-    #   - `1` for the initial fragment.
-    #   - Any other value for continuation fragments.
-    #
-    # @return [String]
-    #   Returns the constructed prompt as a single string, combining the generation template and the base prompt.
-    #
-    # @example Building a prompt for the first fragment
-    #   base_prompt = "Write the introduction to the chapter."
-    #   generated_prompt = build_prompt(base_prompt, 1)
-    #   # => "INITIAL_PROMPT Write the introduction to the chapter."
-    #
-    # @example Building a prompt for a continuation fragment
-    #   base_prompt = "Continue the chapter narrative."
-    #   generated_prompt = build_prompt(base_prompt, 2)
-    #   # => "CONTINUE_PROMPT Continue the chapter narrative."
-    #
-    # @note
-    #   - The method selects a predefined generation template:
-    #     - `CONFIG[:initial_prompt]` for the first fragment.
-    #     - `CONFIG[:continue_prompt]` for continuation fragments.
-    #   - Combines the selected template with the provided base prompt using a space separator.
-    #
-    # === Workflow
-    # 1. Determines the appropriate generation template based on the fragment number.
-    # 2. Combines the selected template with the base prompt.
-    # 3. Returns the constructed prompt.
-    #
-    # @raise [ArgumentError]
-    #   Raises an error if the `fragment_number` is invalid (e.g., not an integer).
-    def build_prompt(prompt, fragment_number)
-      generation_prompt = (fragment_number == 1) ? CONFIG[:initial_prompt] : CONFIG[:continue_prompt]
-      [generation_prompt, prompt].join ' '
     end
 
     # Parses a response text into a chapter fragment and a summary, applying optional parsers.
@@ -220,7 +176,7 @@ module GPTK
     #   - The response is split into two parts:
     #     - The main chapter fragment (before the delimiter).
     #     - The chapter summary (after the delimiter).
-    #   - Delimiters include dashes (`---`), Unicode dashes (`\p{Pd}`), or asterisks (`***`).
+    #   - Delimiters include dashes (`---`), Unicode dashes, or asterisks (`***`).
     #   - Parsers can be used to:
     #     - Replace text (`String` or `Proc`).
     #     - Remove unwanted text (`nil` as a replacement).
@@ -329,7 +285,42 @@ module GPTK
       @data[:word_counts].each_with_index { |chapter_words, i| io_stream.puts "\nChapter #{i + 1}: #{chapter_words} words" }
     end
 
-    # Write completed chapters to the output file
+    # Saves the chapters of a book to a file.
+    #
+    # This method writes the content of the `@chapters` instance variable to a file.
+    # Each chapter is written sequentially, separated by two newline characters ("\n\n").
+    # The output file name is dynamically generated based on the `@output_file` and
+    # `@agent` instance variables. If `@agent` is "Grok," the file is saved with a `.md`
+    # extension; otherwise, it uses a `.txt` extension. The method handles incrementing
+    # the filename to avoid overwriting existing files.
+    #
+    # @return [void]
+    #   Outputs messages to the console indicating success or any errors encountered.
+    #
+    # @example Successful save:
+    #   @chapters = [["Chapter 1 text"], ["Chapter 2 text"]]
+    #   @output_file = "my_book"
+    #   @agent = "ChatGPT"
+    #
+    #   save
+    #   # Writing chapter 1 to file...
+    #   # Writing chapter 2 to file...
+    #   # Successfully wrote 2 chapters to file: my_book-ChatGPT.txt
+    #
+    # @example No content to save:
+    #   @chapters = []
+    #   save
+    #   # => "Error: no content to write."
+    #
+    # @note
+    #   - The `@chapters` instance variable must be an array of arrays, where each
+    #     sub-array contains strings representing the content of a chapter.
+    #   - This method will skip execution if `@chapters` is `nil` or empty.
+    #
+    # @raise [IOError] If the file cannot be opened or written to.
+    #
+    # @see GPTK::File.fname_increment
+    # @see File.open
     def save
       if @chapters.empty? || @chapters.nil?
         puts 'Error: no content to write.'
@@ -344,9 +335,251 @@ module GPTK
       puts "Successfully wrote #{@chapters.count} chapters to file: #{::File.path output_file}"
     end
 
-    # Output a compiled String version of the book content
+    # Converts the chapters of a book into a formatted string representation.
+    #
+    # This method iterates through all chapters stored in the `@chapters` instance variable.
+    # Each chapter is assumed to be an array of strings, which are joined together to form a
+    # single string representing the chapter's content. All chapters are then concatenated with
+    # two newline characters ("\n\n") to separate them.
+    #
+    # @return [String] A formatted string where each chapter's content is concatenated and
+    #                  separated by two newline characters.
+    #
+    # @example
+    #   @chapters = [
+    #     ["Once upon a time, ", "in a faraway land."],
+    #     ["The hero embarked ", "on a great journey."]
+    #   ]
+    #
+    #   to_s
+    #   # => "Once upon a time, in a faraway land.\n\nThe hero embarked on a great journey."
+    #
+    # @note
+    #   - This method assumes that each chapter in `@chapters` is an array of strings.
+    #   - If `@chapters` is empty or contains non-array elements, it may raise an error
+    #     or produce unexpected results.
+    #
+    # @see Array#join
     def to_s
       @chapters.collect { |chapter| chapter.join }.join("\n\n")
+    end
+
+    # Generates a novel with a specified number of chapters and optional fragments per chapter.
+    #
+    # This method automates the process of generating a novel by leveraging AI tools like ChatGPT.
+    # It uses a pre-defined outline and instructions to produce chapters, optionally divided into fragments.
+    #
+    # @param [Integer] number_of_chapters
+    #   The number of chapters to generate. Default: `CONFIG[:num_chapters]`.
+    #
+    # @param [Integer, nil] fragments
+    #   The number of fragments to divide each chapter into. If `nil`, no fragmentation is applied.
+    #   Default: `CONFIG[:chapter_fragments]`.
+    #
+    # @return [Array<String>]
+    #   Returns an array containing the generated chapters, where each chapter is represented as a string.
+    #
+    # @example Generating a 5-chapter novel
+    #   book = generate(5)
+    #
+    # @example Generating a novel with 10 chapters and 3 fragments per chapter
+    #   book = generate(10, 3)
+    #
+    # @note
+    #   - This method interacts with ChatGPT to create assistant sessions and threads for consistent multi-chapter generation.
+    #   - The `fragments` parameter allows finer control over chapter content granularity.
+    #   - The generated book and related metadata are cached for debugging and reuse.
+    #
+    # === Workflow
+    # 1. Sets the number of chapters and fragments in the configuration.
+    # 2. Initializes a ChatGPT assistant and thread if ChatGPT is the selected agent.
+    # 3. Sends the novel outline to the AI for contextual reference.
+    # 4. Iteratively generates chapters using AI prompts.
+    # 5. Caches the final book and outputs metadata for analysis.
+    #
+    # @raise [RuntimeError]
+    #   Raises an error if AI interactions fail or unexpected conditions occur during chapter generation.
+    #
+    # === Metadata Outputs
+    # - Outputs run metadata, such as elapsed time and cached results, for debugging and analysis.
+    # - Stores the book, outline, and last output in global and instance variables.
+    #
+    # === Internal Caching
+    # - Caches the last operation’s result in `@last_output`.
+    # - Caches the generated chapters globally in `$chapters` for further reference.
+    def generate(number_of_chapters = CONFIG[:num_chapters], fragments = CONFIG[:chapter_fragments])
+      start_time = Time.now
+      CONFIG[:num_chapters] = number_of_chapters
+      book = []
+      begin
+        puts "Generating a novel #{number_of_chapters} chapter(s) long." +
+               (fragments ? " #{fragments} fragments per chapter." : '')
+        puts 'Sending initial prompt, and GPT instructions...'
+
+        if agent == 'ChatGPT'
+          # Create the Assistant if it does not exist already
+          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
+                           response = @chatgpt_client.assistants.create(
+                             parameters: {
+                               model: GPTK::AI::CONFIG[:openai_gpt_model],
+                               name: 'AI Book generator',
+                               description: 'AI Book generator',
+                               instructions: @instructions
+                             }
+                           )
+                           response['id']
+                         else
+                           @chatgpt_client.assistants.list['data'].first['id']
+                         end
+
+          # Create the Thread
+          response = @chatgpt_client.threads.create
+          thread_id = response['id']
+
+          # Send the AI the book outline for future reference
+          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
+          @chatgpt_client.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
+          )
+        end
+
+        # Generate as many chapters as are specified
+        (1..number_of_chapters).each do |i|
+          puts "Generating chapter #{i}..."
+          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
+          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments)
+        end
+
+        # Cache result of last operation
+        @last_output = book
+
+        book
+      ensure
+        # Output some metadata - useful information about the run, API status, book content, etc.
+        output_run_info start_time: start_time
+        $chapters = book if $chapters
+        $outline = @outline if $outline
+        $last_output = @last_output if $last_output
+        @chatgpt_client.threads.delete id: thread_id if @agent == 'ChatGPT' # Garbage collection
+      end
+    end
+
+    # Generates a specified number of chapters for a novel using AI agents.
+    #
+    # This method automates the process of generating a novel with the specified number of chapters.
+    # It integrates with AI tools like ChatGPT and Claude, leveraging a pre-defined outline and instructions
+    # to produce coherent and consistent story chapters.
+    #
+    # @param [Integer] number_of_chapters
+    #   The number of chapters to generate. Default: `CONFIG[:num_chapters]`.
+    #
+    # @param [Integer] fragments
+    #   The number of fragments to divide each chapter into. Default: `1`.
+    #
+    # @return [Array<String>]
+    #   Returns an array of generated chapters, where each chapter is a string.
+    #
+    # @example Generating a 10-chapter novel
+    #   chapters = generate_zipper(10)
+    #
+    # @example Generating chapters with multiple fragments
+    #   chapters = generate_zipper(5, 3)
+    #
+    # @note
+    #   - The method initializes or updates ChatGPT and Claude sessions for chapter generation.
+    #   - Uses a parity system to alternate between agents or approaches for chapter creation.
+    #   - Caches the last output for reuse or debugging.
+    #
+    # @todo
+    #   - Add support for additional AI agents in future implementations.
+    #
+    # === Workflow
+    # 1. Sets the number of chapters in the configuration.
+    # 2. Prepares the AI prompt using the provided outline and instructions.
+    # 3. Interacts with ChatGPT to create and manage assistant sessions and threads.
+    # 4. Initializes Claude memory for coherent multi-chapter generation.
+    # 5. Iteratively generates chapters while alternating parity for variety.
+    # 6. Cleans up AI threads and outputs metadata for analysis.
+    #
+    # @raise [RuntimeError]
+    #   Raises an error if AI interactions fail or unexpected conditions occur during chapter generation.
+    #
+    # === Metadata Outputs
+    # - Outputs run metadata, such as elapsed time and Claude memory word count, for debugging and analysis.
+    # - Caches generated chapters and outline in global variables for reference.
+    #
+    # === Internal Caching
+    # - The last generated chapter and the full set of chapters are cached in `@last_output` and `@book`, respectively.
+    def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1)
+      start_time = Time.now
+      CONFIG[:num_chapters] = number_of_chapters # Update config
+      chapters = []
+      begin
+        puts "Generating a novel #{number_of_chapters} chapter(s) long.\n"
+        puts 'Sending initial prompt, and GPT instructions...'
+
+        prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
+
+        if @chatgpt_client
+          # Create the Assistant if it does not exist already
+          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
+                           response = @chatgpt_client.assistants.create(
+                             parameters: {
+                               model: GPTK::AI::CONFIG[:openai_gpt_model],
+                               name: 'AI Book generator',
+                               description: 'AI Book generator',
+                               instructions: @instructions
+                             }
+                           )
+                           response['id']
+                         else
+                           @chatgpt_client.assistants.list['data'].last['id']
+                         end
+
+          # Create the Thread
+          thread_id = @chatgpt_client.threads.create['id']
+
+          # Send ChatGPT the book outline for future reference
+          @chatgpt_client.messages.create(
+            thread_id: thread_id,
+            parameters: { role: 'user', content: prompt }
+          )
+        end
+
+        claude_memory = {}
+        if @claude_client
+          # Instantiate Claude memory for chapter production conversation
+          # Ensure `claude_messages` is always an Array with ONE element using cache_control type: 'ephemeral'
+          initial_memory = "#{prompt}\n\nINSTRUCTIONS FOR CLAUDE:\n\n#{@instructions}END OF INSTRUCTIONS"
+          claude_memory = { role: 'user', content: [{ type: 'text', text: initial_memory, cache_control: { type: 'ephemeral' } }] }
+        end
+
+        # Generate as many chapters as are specified
+        parity = 0
+        prev_chapter = []
+        (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
+          chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
+          parity = parity.zero? ? 1 : 0
+          prev_chapter = chapter
+          @last_output = chapter # Cache results of the last operation
+          chapters << chapter
+        end
+
+        @last_output = chapters # Cache results of the last operation
+        chapters # Return the generated story chapters
+      ensure
+        @chatgpt_client.threads.delete id: thread_id # Garbage collection
+        # Output some metadata - useful information about the run, API status, book content, etc.
+        output_run_info start_time: start_time
+        $chapters = chapters if $chapters
+        $outline = @outline if $outline
+        $last_output = @last_output if $last_output
+        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}" if claude_memory
+      end
+      puts "Congratulations! Successfully generated #{chapters.count} chapters."
+      @book = chapters
+      chapters
     end
 
     # Generates a single chapter in fragments using multiple AI agents.
@@ -703,224 +936,6 @@ module GPTK
       end
       @chapters << chapter
       chapter # Array of Strings representing chapter fragments for one chapter
-    end
-
-    # Generates a novel with a specified number of chapters and optional fragments per chapter.
-    #
-    # This method automates the process of generating a novel by leveraging AI tools like ChatGPT.
-    # It uses a pre-defined outline and instructions to produce chapters, optionally divided into fragments.
-    #
-    # @param [Integer] number_of_chapters
-    #   The number of chapters to generate. Default: `CONFIG[:num_chapters]`.
-    #
-    # @param [Integer, nil] fragments
-    #   The number of fragments to divide each chapter into. If `nil`, no fragmentation is applied.
-    #   Default: `CONFIG[:chapter_fragments]`.
-    #
-    # @return [Array<String>]
-    #   Returns an array containing the generated chapters, where each chapter is represented as a string.
-    #
-    # @example Generating a 5-chapter novel
-    #   book = generate(5)
-    #
-    # @example Generating a novel with 10 chapters and 3 fragments per chapter
-    #   book = generate(10, 3)
-    #
-    # @note
-    #   - This method interacts with ChatGPT to create assistant sessions and threads for consistent multi-chapter generation.
-    #   - The `fragments` parameter allows finer control over chapter content granularity.
-    #   - The generated book and related metadata are cached for debugging and reuse.
-    #
-    # === Workflow
-    # 1. Sets the number of chapters and fragments in the configuration.
-    # 2. Initializes a ChatGPT assistant and thread if ChatGPT is the selected agent.
-    # 3. Sends the novel outline to the AI for contextual reference.
-    # 4. Iteratively generates chapters using AI prompts.
-    # 5. Caches the final book and outputs metadata for analysis.
-    #
-    # @raise [RuntimeError]
-    #   Raises an error if AI interactions fail or unexpected conditions occur during chapter generation.
-    #
-    # === Metadata Outputs
-    # - Outputs run metadata, such as elapsed time and cached results, for debugging and analysis.
-    # - Stores the book, outline, and last output in global and instance variables.
-    #
-    # === Internal Caching
-    # - Caches the last operation’s result in `@last_output`.
-    # - Caches the generated chapters globally in `$chapters` for further reference.
-    def generate(number_of_chapters = CONFIG[:num_chapters], fragments = CONFIG[:chapter_fragments])
-      start_time = Time.now
-      CONFIG[:num_chapters] = number_of_chapters
-      book = []
-      begin
-        puts "Generating a novel #{number_of_chapters} chapter(s) long." +
-               (fragments ? " #{fragments} fragments per chapter." : '')
-        puts 'Sending initial prompt, and GPT instructions...'
-
-        if agent == 'ChatGPT'
-          # Create the Assistant if it does not exist already
-          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
-                          response = @chatgpt_client.assistants.create(
-                             parameters: {
-                               model: GPTK::AI::CONFIG[:openai_gpt_model],
-                               name: 'AI Book generator',
-                               description: 'AI Book generator',
-                               instructions: @instructions
-                             }
-                           )
-                           response['id']
-                         else
-                           @chatgpt_client.assistants.list['data'].first['id']
-                         end
-
-          # Create the Thread
-          response = @chatgpt_client.threads.create
-          thread_id = response['id']
-
-          # Send the AI the book outline for future reference
-          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
-          @chatgpt_client.messages.create(
-            thread_id: thread_id,
-            parameters: { role: 'user', content: prompt }
-          )
-        end
-
-        # Generate as many chapters as are specified
-        (1..number_of_chapters).each do |i|
-          puts "Generating chapter #{i}..."
-          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
-          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments)
-        end
-
-        # Cache result of last operation
-        @last_output = book
-
-        book
-      ensure
-        # Output some metadata - useful information about the run, API status, book content, etc.
-        output_run_info start_time: start_time
-        $chapters = book if $chapters
-        $outline = @outline if $outline
-        $last_output = @last_output if $last_output
-        @chatgpt_client.threads.delete id: thread_id if @agent == 'ChatGPT' # Garbage collection
-      end
-    end
-
-    # Generates a specified number of chapters for a novel using AI agents.
-    #
-    # This method automates the process of generating a novel with the specified number of chapters.
-    # It integrates with AI tools like ChatGPT and Claude, leveraging a pre-defined outline and instructions
-    # to produce coherent and consistent story chapters.
-    #
-    # @param [Integer] number_of_chapters
-    #   The number of chapters to generate. Default: `CONFIG[:num_chapters]`.
-    #
-    # @param [Integer] fragments
-    #   The number of fragments to divide each chapter into. Default: `1`.
-    #
-    # @return [Array<String>]
-    #   Returns an array of generated chapters, where each chapter is a string.
-    #
-    # @example Generating a 10-chapter novel
-    #   chapters = generate_zipper(10)
-    #
-    # @example Generating chapters with multiple fragments
-    #   chapters = generate_zipper(5, 3)
-    #
-    # @note
-    #   - The method initializes or updates ChatGPT and Claude sessions for chapter generation.
-    #   - Uses a parity system to alternate between agents or approaches for chapter creation.
-    #   - Caches the last output for reuse or debugging.
-    #
-    # @todo
-    #   - Add support for additional AI agents in future implementations.
-    #
-    # === Workflow
-    # 1. Sets the number of chapters in the configuration.
-    # 2. Prepares the AI prompt using the provided outline and instructions.
-    # 3. Interacts with ChatGPT to create and manage assistant sessions and threads.
-    # 4. Initializes Claude memory for coherent multi-chapter generation.
-    # 5. Iteratively generates chapters while alternating parity for variety.
-    # 6. Cleans up AI threads and outputs metadata for analysis.
-    #
-    # @raise [RuntimeError]
-    #   Raises an error if AI interactions fail or unexpected conditions occur during chapter generation.
-    #
-    # === Metadata Outputs
-    # - Outputs run metadata, such as elapsed time and Claude memory word count, for debugging and analysis.
-    # - Caches generated chapters and outline in global variables for reference.
-    #
-    # === Internal Caching
-    # - The last generated chapter and the full set of chapters are cached in `@last_output` and `@book`, respectively.
-    def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1)
-      start_time = Time.now
-      CONFIG[:num_chapters] = number_of_chapters # Update config
-      chapters = []
-      begin
-        puts "Generating a novel #{number_of_chapters} chapter(s) long.\n"
-        puts 'Sending initial prompt, and GPT instructions...'
-
-        prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
-
-        if @chatgpt_client
-          # Create the Assistant if it does not exist already
-          assistant_id = if @chatgpt_client.assistants.list['data'].empty?
-                           response = @chatgpt_client.assistants.create(
-                             parameters: {
-                               model: GPTK::AI::CONFIG[:openai_gpt_model],
-                               name: 'AI Book generator',
-                               description: 'AI Book generator',
-                               instructions: @instructions
-                             }
-                           )
-                           response['id']
-                         else
-                           @chatgpt_client.assistants.list['data'].last['id']
-                         end
-
-          # Create the Thread
-          thread_id = @chatgpt_client.threads.create['id']
-
-          # Send ChatGPT the book outline for future reference
-          @chatgpt_client.messages.create(
-            thread_id: thread_id,
-            parameters: { role: 'user', content: prompt }
-          )
-        end
-
-        claude_memory = {}
-        if @claude_client
-          # Instantiate Claude memory for chapter production conversation
-          # Ensure `claude_messages` is always an Array with ONE element using cache_control type: 'ephemeral'
-          initial_memory = "#{prompt}\n\nINSTRUCTIONS FOR CLAUDE:\n\n#{@instructions}END OF INSTRUCTIONS"
-          claude_memory = { role: 'user', content: [{ type: 'text', text: initial_memory, cache_control: { type: 'ephemeral' } }] }
-        end
-
-        # Generate as many chapters as are specified
-        parity = 0
-        prev_chapter = []
-        (1..number_of_chapters).each do |chapter_number| # CAREFUL WITH THIS VALUE!
-          chapter = generate_chapter_zipper(parity, chapter_number, thread_id, assistant_id, fragments, prev_chapter)
-          parity = parity.zero? ? 1 : 0
-          prev_chapter = chapter
-          @last_output = chapter # Cache results of the last operation
-          chapters << chapter
-        end
-
-        @last_output = chapters # Cache results of the last operation
-        chapters # Return the generated story chapters
-      ensure
-        @chatgpt_client.threads.delete id: thread_id # Garbage collection
-        # Output some metadata - useful information about the run, API status, book content, etc.
-        output_run_info start_time: start_time
-        $chapters = chapters if $chapters
-        $outline = @outline if $outline
-        $last_output = @last_output if $last_output
-        puts "Claude memory word count: #{GPTK::Text.word_count claude_memory[:content].first[:text]}" if claude_memory
-      end
-      puts "Congratulations! Successfully generated #{chapters.count} chapters."
-      @book = chapters
-      chapters
     end
 
     # TODO: write 'revise_book' that can take an entire book file and break it down chapter by chapter
@@ -1501,6 +1516,52 @@ module GPTK
       end
 
       [revised_chapter_text, revisions]
+    end
+
+    private
+
+    # Builds a generation prompt based on the fragment number and a provided base prompt.
+    #
+    # This method constructs a complete prompt for generating chapter fragments, selecting a predefined
+    # generation template based on whether the fragment is the first one or a continuation.
+    #
+    # @param [String] prompt
+    #   The base prompt to guide content generation. This typically includes context or specific instructions.
+    #
+    # @param [Integer] fragment_number
+    #   The fragment number to determine which generation template to use:
+    #   - `1` for the initial fragment.
+    #   - Any other value for continuation fragments.
+    #
+    # @return [String]
+    #   Returns the constructed prompt as a single string, combining the generation template and the base prompt.
+    #
+    # @example Building a prompt for the first fragment
+    #   base_prompt = "Write the introduction to the chapter."
+    #   generated_prompt = build_prompt(base_prompt, 1)
+    #   # => "INITIAL_PROMPT Write the introduction to the chapter."
+    #
+    # @example Building a prompt for a continuation fragment
+    #   base_prompt = "Continue the chapter narrative."
+    #   generated_prompt = build_prompt(base_prompt, 2)
+    #   # => "CONTINUE_PROMPT Continue the chapter narrative."
+    #
+    # @note
+    #   - The method selects a predefined generation template:
+    #     - `CONFIG[:initial_prompt]` for the first fragment.
+    #     - `CONFIG[:continue_prompt]` for continuation fragments.
+    #   - Combines the selected template with the provided base prompt using a space separator.
+    #
+    # === Workflow
+    # 1. Determines the appropriate generation template based on the fragment number.
+    # 2. Combines the selected template with the base prompt.
+    # 3. Returns the constructed prompt.
+    #
+    # @raise [ArgumentError]
+    #   Raises an error if the `fragment_number` is invalid (e.g., not an integer).
+    def build_prompt(prompt, fragment_number)
+      generation_prompt = (fragment_number == 1) ? CONFIG[:initial_prompt] : CONFIG[:continue_prompt]
+      [generation_prompt, prompt].join ' '
     end
   end
 end

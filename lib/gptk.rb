@@ -1,7 +1,7 @@
 require 'json'
 require 'yaml'
 require 'parallel'
-%w[ai book config doc file text utils].each do |lib|
+%w[ai book config doc text utils].each do |lib|
   print "Loading module: #{lib.capitalize}... "
   load "#{__dir__}/gptk/#{lib}.rb" # TODO: change to use 'require' for production
   puts 'Success!'
@@ -10,7 +10,7 @@ end
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
   START_TIME = Time.now
-  VERSION = '0.14'.freeze
+  VERSION = '0.15'.freeze
 
   # Load configuration files
   Config.load_openai_setup

@@ -1,4 +1,5 @@
 module GPTK
+  # This module loads the configuration files into the primary namespace for easy access
   module Config
     def self.load_openai_setup
       print 'Loading platform-agnostic AI setup code... '
