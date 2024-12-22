@@ -3,6 +3,7 @@
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
 ## 0.16
+- Fixed an error in `Book#generate`
 
 ## 0.15 - 2024.12.18
 - Added [`README.md`](README.md) (finally).

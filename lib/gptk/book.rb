@@ -708,7 +708,7 @@ module GPTK
 
         # Set up the payload
         payload = {
-          contents: [{ role: 'user', content: general_prompt }],
+          contents: [{ role: 'user', parts: [{ text: general_prompt }] }],
           cachedContent: cache_name
         }
       end
