@@ -271,7 +271,7 @@ module GPTK
                   else STDOUT
                   end
       io_stream.seek 0, IO::SEEK_END
-      io_stream.puts "\nSuccessfully generated #{CONFIG[:num_chapters]} chapters, for a total of #{@data[:word_counts].reduce(&:+)} words.\n\n"
+      io_stream.puts "\nSuccessfully generated #{$chapters.count} chapters, for a total of #{@data[:word_counts].reduce(&:+)} words.\n\n"
       io_stream.puts <<~STRING
         Total token usage:
         - Prompt tokens used: #{@data[:prompt_tokens]}
@@ -326,11 +326,11 @@ module GPTK
         puts 'Error: no content to write.'
         return
       end
-      filename = GPTK::File.fname_increment "#{@output_file}-#{@agent}#{@agent == 'Grok' ? '.md' : '.txt'}"
+      filename = GPTK::Utils.fname_increment "#{@output_file}-#{@agent}#{@agent == 'Grok' ? '.md' : '.txt'}"
       output_file = ::File.open(filename, 'w+')
       @chapters.each_with_index do |chapter, i|
         puts "Writing chapter #{i + 1} to file..."
-        output_file.puts chapter.join("\n\n") + "\n\n"
+        output_file.puts chapter.join + "\n\n"
       end
       puts "Successfully wrote #{@chapters.count} chapters to file: #{::File.path output_file}"
     end
@@ -416,7 +416,7 @@ module GPTK
                (fragments ? " #{fragments} fragments per chapter." : '')
         puts 'Sending initial prompt, and GPT instructions...'
 
-        if agent == 'ChatGPT'
+        if @agent == 'ChatGPT'
           # Create the Assistant if it does not exist already
           assistant_id = if @chatgpt_client.assistants.list['data'].empty?
                            response = @chatgpt_client.assistants.create(
@@ -647,10 +647,12 @@ module GPTK
       chapter = []
 
       # Initialize ChatGPT with training data
-      CHATGPT.messages.create thread_id: thread_id, parameters: {
-        role: 'user',
-        content: "TRAINING DATA:\n#{@training}\nEND OF TRAINING DATA"
-      }
+      if @chatgpt_client
+        CHATGPT.messages.create thread_id: thread_id, parameters: {
+          role: 'user',
+          content: "TRAINING DATA:\n#{@training}\nEND OF TRAINING DATA"
+        }
+      end
 
       # Initialize claude memory every time we run a chapter generation operation
       if @claude_client
@@ -706,7 +708,7 @@ module GPTK
 
         # Set up the payload
         payload = {
-          contents: [{ role: 'user', parts: [{ text: general_prompt }] }],
+          contents: [{ role: 'user', content: general_prompt }],
           cachedContent: cache_name
         }
       end

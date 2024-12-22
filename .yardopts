@@ -1,0 +1,8 @@
+--markup markdown
+--readme README.md
+--files CHANGELOG.md
+--files TODO.md
+--files CONTRIBUTING.md
+--files LICENSE
+--title "GPTK Documentation"
+lib/**/*.rb
