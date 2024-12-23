@@ -3,6 +3,7 @@
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
 ## 0.16
+- Toughened up Grok error handling so that it doesn't result in an infinite loop on a JSON parse error. It can now run safely in the background.
 - Fixed an error in `Book#generate`
 
 ## 0.15 - 2024.12.18

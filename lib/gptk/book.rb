@@ -47,7 +47,8 @@ module GPTK
   # 4. Save the generated content to a file using `save`.
   class Book
     $chapters, $outline, $last_output = [], '', nil
-    attr_reader :chapters, :chatgpt_client, :claude_client, :last_output, :agent
+    attr_reader :chapters, :chatgpt_client, :claude_client, :last_output, :agent,
+                :anthropic_api_key, :xai_api_key, :google_api_key
     attr_accessor :parsers, :output_file, :genre, :instructions, :outline, :training
 
     # Initializes a new instance of the `Book` class.
@@ -447,7 +448,7 @@ module GPTK
         # Generate as many chapters as are specified
         (1..number_of_chapters).each do |i|
           puts "Generating chapter #{i}..."
-          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already supplied. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
+          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already cached. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
           book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments)
         end
 
@@ -672,9 +673,9 @@ module GPTK
         data = "OUTLINE:\n#{@outline}\nEND OF OUTLINE\n\nTRAINING DATA:\n\n#{@training}\n\nEND OF TRAINING DATA"
         cache_data = Base64.strict_encode64 data
         # Ensure min token amount is present in cache object, otherwise it will throw an API error
-        chars_to_add = GPTK::AI::CONFIG[:gemini_min_cache_tokens] * 7 - cache_data.size
+        chars_to_add = GPTK::AI::CONFIG[:gemini_min_cache_tokens] * 5 - cache_data.size
         if chars_to_add > 0
-          cache_data = Base64.strict_encode64 "#{'F' * chars_to_add}\n\n#{cache_data}"
+          cache_data = Base64.strict_encode64 "#{'F' * chars_to_add}#{cache_data}"
         end
         request_payload = {
           model: 'models/gemini-1.5-flash-001',
@@ -682,9 +683,9 @@ module GPTK
               role: 'user',
               parts: [{ inline_data: { mime_type: 'text/plain', data: cache_data } }]
             }],
-          ttl: CONFIG[:gemini_ttl]
+          ttl: GPTK::AI::CONFIG[:gemini_ttl]
         }
-        request_payload.update({ systemInstruction: { parts: [{ text: @instructions }] } }) if @instructions
+        request_payload.update(systemInstruction: { parts: [{ text: @instructions }] }) if @instructions
 
         # Cache the content
         begin
@@ -707,7 +708,7 @@ module GPTK
         cache_name = cache_response_body['name']
 
         # Set up the payload
-        payload = {
+        payload_with_cache = {
           contents: [{ role: 'user', parts: [{ text: general_prompt }] }],
           cachedContent: cache_name
         }
@@ -770,21 +771,21 @@ module GPTK
         end
 
         if @google_api_key
-          gemini_fragment = "#{GPTK::AI::Gemini.query_with_cache(@google_api_key, payload)}\n\n"
+          gemini_fragment = "#{GPTK::AI::Gemini.query_with_cache(@google_api_key, payload_with_cache)}\n\n"
           chapter << gemini_fragment
           # Set up the cache with the latest generated chapter fragment added
-          cache_data = Base64.strict_encode64 "\n\nFRAGMENT #{i}:\n\n#{gemini_fragment}#{cache_data}"
+          cache_data = Base64.strict_encode64 "\n\nFRAGMENT #{i}:#{gemini_fragment}#{cache_data}"
           request_payload = {
             model: 'models/gemini-1.5-flash-001',
             contents: [{
                          role: 'user',
                          parts: [{ inline_data: { mime_type: 'text/plain', data: cache_data } }]
                        }],
-            ttl: CONFIG[:gemini_ttl]
+            ttl: GPTK::AI::CONFIG[:gemini_ttl]
           }
 
           # Remove old cache
-          HTTParty.post(
+          HTTParty.delete(
             "https://generativelanguage.googleapis.com/v1beta/#{cache_name}?key=#{@google_api_key}"
           )
 
@@ -809,7 +810,7 @@ module GPTK
           cache_name = cache_response_body['name']
 
           # Set up the payload again
-          payload = {
+          payload_with_cache = {
             contents: [{ role: 'user', parts: [{ text: general_prompt }] }],
             cachedContent: cache_name
           }
@@ -817,7 +818,7 @@ module GPTK
       end
 
       if @google_api_key # Remove old cache (garbage collection)
-        HTTParty.post(
+        HTTParty.delete(
           "https://generativelanguage.googleapis.com/v1beta/#{cache_name}?key=#{@google_api_key}"
         )
       end
@@ -1079,7 +1080,6 @@ module GPTK
         puts " #{matches[:chatgpt].count} matches detected!" if matches[:chatgpt]
       end
 
-      return matches
       # Merge the results of each AI's analysis
       puts 'Merging results...'
       # Keep the original matches hash intact
@@ -1103,7 +1103,7 @@ module GPTK
       final_matches.uniq!
 
       # Symbolify the keys
-      final_matches.map! { |p| Utils.symbolify_keys p }
+      final_matches.map! { |p| Utils.symbolify_keys! p }
 
       # Remove duplicate matches for the same sentence (we don't need to rewrite the same sentence multiple times)
       # final_matches.delete_if do |d|

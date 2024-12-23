@@ -421,8 +421,6 @@ module GPTK
       #
       # @todo Look into and possibly write a fix for repeated JSON parsing errors (looping)
       def self.query(api_key, prompt, system_prompt = nil)
-        # Grok manual HTTP API call
-        output = ''
         headers = {
           'Authorization' => "Bearer #{api_key}",
           'content-type' => 'application/json'
@@ -439,34 +437,58 @@ module GPTK
           'temperature': CONFIG[:xai_temperature],
           'messages': messages
         }
+
+        max_retries = 5
+        retries = 0
+
         begin
           response = HTTParty.post(
             'https://api.x.ai/v1/chat/completions',
             headers: headers,
             body: body.to_json
           )
+
+          # Check if the response is nil or not successful
+          if response.nil? || response.code != 200
+            raise "Unexpected response: #{response.inspect}"
+          end
+
+          parsed_response = JSON.parse(response.body)
+          output = parsed_response.dig('choices', 0, 'message', 'content')
+
+          if output.nil? || output.empty?
+            raise "Empty or nil output received: #{parsed_response.inspect}"
+          end
+
+          output
+        rescue Net::ReadTimeout => e
+          puts "Network timeout occurred: #{e.class}. Retrying query..."
+          retries += 1
+          if retries <= max_retries
+            sleep(5)
+            retry
+          else
+            raise "Exceeded maximum retries due to timeout errors."
+          end
+        rescue JSON::ParserError => e
+          puts "JSON parsing error: #{e.class}. Raw response: #{response&.body.inspect}"
+          retries += 1
+          if retries <= max_retries
+            sleep(5)
+            retry
+          else
+            raise "Exceeded maximum retries due to JSON parsing errors."
+          end
         rescue => e
-          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
-          sleep 10
-          return query api_key, prompt
+          puts "Unexpected Error: #{e.class}: #{e.message}. Raw Response: #{response&.body.inspect}"
+          retries += 1
+          if retries <= max_retries
+            sleep(5)
+            retry
+          else
+            raise "Exceeded maximum retries due to unexpected errors."
+          end
         end
-        # TODO: track data
-        # Return text content of the Grok API response
-        sleep 1 # Important to avoid race conditions and token throttling!
-        begin
-          output = JSON.parse(response.body).dig 'choices', 0, 'message', 'content'
-        rescue => e # We want to catch ALL errors, not just those under StandardError
-          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
-          sleep 10
-          output = query api_key, messages
-        end
-        if output.nil?
-          ap JSON.parse response.body
-          puts 'Error: Grok API provided a bad response. Retrying query...'
-          sleep 10
-          output = query api_key, messages
-        end
-        output
       end
     end
 
@@ -564,35 +586,58 @@ module GPTK
       # @see HTTParty.post
       # @see JSON.parse
       def self.query_with_cache(api_key, body, model = CONFIG[:google_gpt_model])
-        # Gemini manual HTTP API call
+        max_retries = 5
+        retries = 0
+
         begin
           response = HTTParty.post(
-            "#{BASE_URL}/models/#{model}:generateContent?key=#{api_key}",
+            "#{BASE_URL}/models/#{model}-001:generateContent?key=#{api_key}",
             headers: { 'content-type' => 'application/json' },
             body: body.to_json
           )
-          # TODO: track data
-        rescue => e # We want to catch ALL errors, not just those under StandardError
-          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
-          sleep 10
-          return query_with_cache api_key, body
+
+          # Explicitly check the response body for nil or empty
+          if response.body.nil? || response.body.empty?
+            raise "Unexpected response: Body is nil or empty."
+          end
+
+          # Parse the response to extract the output
+          output = JSON.parse(response.body).dig('candidates', 0, 'content', 'parts', 0, 'text')
+
+          # Check if the output is nil or empty
+          if output.nil? || output.empty?
+            raise "Empty or nil output received: #{response.body.inspect}"
+          end
+
+          return output
+        rescue JSON::ParserError => e
+          puts "JSON Parsing Error: #{e.class}: #{e.message}. Retrying..."
+          retries += 1
+          if retries <= max_retries
+            sleep(5)
+            retry
+          else
+            raise "Exceeded maximum retries due to JSON parsing errors."
+          end
+        rescue Errno::ECONNRESET, Net::ReadTimeout => e
+          puts "Network Error: #{e.class}: #{e.message}. Retrying..."
+          retries += 1
+          if retries <= max_retries
+            sleep(5)
+            retry
+          else
+            raise "Exceeded maximum retries due to network errors."
+          end
+        rescue => e
+          puts "Unexpected Error: #{e.class}: #{e.message}. Raw Response: #{response&.body.inspect}"
+          retries += 1
+          if retries <= max_retries
+            sleep(5)
+            retry
+          else
+            raise "Exceeded maximum retries due to unexpected errors."
+          end
         end
-        # Return text content of the Gemini API response
-        sleep 1 # Important to avoid race conditions and token throttling!
-        begin
-          output = JSON.parse(response.body).dig 'candidates', 0, 'content', 'parts', 0, 'text'
-        rescue JSON::ParserError => e # We want to catch ALL errors, not just those under StandardError
-          puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
-          sleep 10
-          output = query_with_cache api_key, body
-        end
-        if output.nil?
-          ap JSON.parse response.body
-          puts 'Error: Gemini API provided a bad response. Retrying query...'
-          sleep 10
-          output = query_with_cache api_key, body
-        end
-        output
       end
     end
 
