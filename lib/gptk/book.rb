@@ -1,4 +1,5 @@
-require 'httparty'
+Bundler.require :default
+
 module GPTK
   # The `Book` class provides functionality to generate, analyze, revise, and save a novel
   # using AI tools like ChatGPT, Claude, Grok, and Gemini. It integrates these AI agents to

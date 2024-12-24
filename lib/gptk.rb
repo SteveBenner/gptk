@@ -1,8 +1,7 @@
 require 'json'
 require 'yaml'
-require 'parallel'
-require 'openai'
-require 'anthropic'
+require 'base64'
+require 'bundler'
 %w[ai book config doc text utils].each do |lib|
   print "Loading module: #{lib.capitalize}... "
   load "#{__dir__}/gptk/#{lib}.rb" # TODO: change to use 'require' for production

@@ -1,3 +1,5 @@
+Bundler.require :default, :ai
+
 module GPTK
   # AI interfaces and tools
   # TODO: add detection of JSON string responses which will automatically parse JSON within the API call method

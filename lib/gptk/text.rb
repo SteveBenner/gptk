@@ -1,4 +1,4 @@
-require 'pragmatic_segmenter'
+Bundler.require :text
 
 module GPTK
   module Text
@@ -357,6 +357,45 @@ module GPTK
         str << "\n"
       end
       str
+    end
+
+    def self.clean_chapter(input_file, analysis_file, cleaned_file)
+      # Extract text from DOCX file using the docx gem
+      doc = Docx::Document.open(input_file)
+      full_text = doc.paragraphs.map(&:text).join("\n")
+
+      # Split content into sentences using Pragmatic Segmenter
+      segmenter = PragmaticSegmenter::Segmenter.new(text: full_text)
+      sentences = segmenter.segment
+
+      # Identify duplicate sentences
+      sentence_count = Hash.new(0)
+      sentences.each { |sentence| sentence_count[sentence.strip] += 1 }
+      duplicates = sentence_count.select { |_sentence, count| count > 1 }.keys
+
+      # Generate analysis file with duplicates highlighted
+      ::Caracal::Document.save(analysis_file) do |doc|
+        sentences.each do |sentence|
+          if duplicates.include?(sentence.strip)
+            doc.p sentence.strip, color: 'FF0000', bold: true, font: 'Times New Roman', underline: false
+          else
+            doc.p sentence.strip, font: 'Times New Roman', underline: false
+          end
+        end
+      end
+
+      # Generate cleaned file with duplicates removed
+      ::Caracal::Document.save(cleaned_file) do |doc|
+        seen_sentences = {}
+
+        sentences.each do |sentence|
+          clean_sentence = sentence.strip
+          unless seen_sentences.include?(clean_sentence)
+            doc.p clean_sentence, font: 'Times New Roman', underline: false
+            seen_sentences[clean_sentence] = true
+          end
+        end
+      end
     end
   end
 end

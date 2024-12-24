@@ -1,4 +1,5 @@
 # TODO:
+- add bundler
 - parse chapter using pragmatic segmenter and find patterns of DUPLICATE TEXT, and flag them, create a .docx
 - fix Gemini cache usage!!!
 - 'mad libs' parsing code
