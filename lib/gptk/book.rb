@@ -100,7 +100,7 @@ module GPTK
                    genre: nil,
                    parsers: CONFIG[:parsers])
       unless chatgpt_client || claude_client || xai_api_key || google_api_key
-        puts 'Error: You must pass in at least ONE AI agent client or API key to the `new` method.'
+        raise 'Error: You must pass in at least ONE AI agent client or API key to the `new` method.'
         return
       end
       @chatgpt_client = chatgpt_client
@@ -462,7 +462,7 @@ module GPTK
         (1..number_of_chapters).each do |i|
           puts "Generating chapter #{i}..."
           prompt = "Generate a fragment of chapter #{i} of the book, referring to the provided outline. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
-          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments, post_prompt: post_prompt)
+          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments)
         end
 
         # Cache result of last operation
@@ -655,7 +655,7 @@ module GPTK
     # @todo
     #   - Add support for fallback mechanisms when one or more agents fail.
     #   - Enhance error handling for Gemini API interactions.
-    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments], post_prompt: nil)
+    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
       raise "Error: 'fragments' is nil!" unless fragments
       messages = [] if @chatgpt_client
       chapter = []
@@ -729,7 +729,6 @@ module GPTK
 
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
-        prompt << "\n\n#{post_prompt}" if post_prompt
         puts "Generating fragment #{i} using #{@agent}..."
 
         if @chatgpt_client # Using the Assistant API
@@ -836,6 +835,7 @@ module GPTK
           "https://generativelanguage.googleapis.com/v1beta/#{cache_name}?key=#{@google_api_key}"
         )
       end
+
 
       @data[:word_counts] << GPTK::Text.word_count(chapter.join "\n")
       @chapters << chapter
