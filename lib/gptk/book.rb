@@ -272,20 +272,30 @@ module GPTK
                   when IO then ::File.open(file, 'a+')
                   else STDOUT
                   end
-      io_stream.seek 0, IO::SEEK_END
+
+      # Perform seek only if supported; silently skip if not
+      if io_stream.respond_to?(:seek)
+        begin
+          io_stream.seek(0, IO::SEEK_END)
+        rescue Errno::EINVAL
+          # Silently skip seek if unsupported
+        end
+      end
+
       io_stream.puts "\nSuccessfully generated #{$chapters.count} chapters, for a total of #{@data[:word_counts].reduce(&:+)} words.\n\n"
       io_stream.puts <<~STRING
-        Total token usage:
-        - Prompt tokens used: #{@data[:prompt_tokens]}
-        - Completion tokens used: #{@data[:completion_tokens]}
-        - Total tokens used: #{@data[:prompt_tokens] + @data[:completion_tokens]}
-        - Cached tokens used: #{@data[:cached_tokens]}
-        - Cached token percentage: #{((@data[:cached_tokens].to_f / @data[:prompt_tokens]) * 100).round 2}%
-      STRING
-      io_stream.puts "\nElapsed time: #{GPTK.elapsed_time start_time} minutes.\n\n"
+    Total token usage:
+    - Prompt tokens used: #{@data[:prompt_tokens]}
+    - Completion tokens used: #{@data[:completion_tokens]}
+    - Total tokens used: #{@data[:prompt_tokens] + @data[:completion_tokens]}
+    - Cached tokens used: #{@data[:cached_tokens]}
+    - Cached token percentage: #{((@data[:cached_tokens].to_f / @data[:prompt_tokens]) * 100).round(2)}%
+  STRING
+      io_stream.puts "\nElapsed time: #{GPTK.elapsed_time(start_time)} minutes.\n\n"
       io_stream.puts "Words by chapter:"
       @data[:word_counts].each_with_index { |chapter_words, i| io_stream.puts "\nChapter #{i + 1}: #{chapter_words} words" }
     end
+
 
     # Saves the chapters of a book to a file.
     #
@@ -363,7 +373,7 @@ module GPTK
     #
     # @see Array#join
     def to_s
-      @chapters.collect { |chapter| chapter.join }.join("\n\n")
+      @chapters.map { |chapter| chapter.is_a?(Array) ? chapter.join : chapter }.join("\n\n")
     end
 
     # Generates a novel with a specified number of chapters and optional fragments per chapter.
@@ -409,7 +419,7 @@ module GPTK
     # === Internal Caching
     # - Caches the last operation’s result in `@last_output`.
     # - Caches the generated chapters globally in `$chapters` for further reference.
-    def generate(number_of_chapters = CONFIG[:num_chapters], fragments = CONFIG[:chapter_fragments])
+    def generate(number_of_chapters = CONFIG[:num_chapters], fragments = CONFIG[:chapter_fragments], post_prompt: nil)
       start_time = Time.now
       CONFIG[:num_chapters] = number_of_chapters
       book = []
@@ -439,7 +449,9 @@ module GPTK
           thread_id = response['id']
 
           # Send the AI the book outline for future reference
-          prompt = "The following text is the outline for a #{genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
+          prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\n#{@outline}"
+          prompt << "\n\n#{post_prompt}" if post_prompt
+
           @chatgpt_client.messages.create(
             thread_id: thread_id,
             parameters: { role: 'user', content: prompt }
@@ -449,8 +461,8 @@ module GPTK
         # Generate as many chapters as are specified
         (1..number_of_chapters).each do |i|
           puts "Generating chapter #{i}..."
-          prompt = "Generate a fragment of chapter #{i} of the book, referring to the outline already cached. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
-          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments)
+          prompt = "Generate a fragment of chapter #{i} of the book, referring to the provided outline. Utilize as much output length as possible when returning content. Output ONLY raw text, no JSON or HTML."
+          book << generate_chapter(prompt, thread_id: thread_id, assistant_id: assistant_id, fragments: fragments, post_prompt: post_prompt)
         end
 
         # Cache result of last operation
@@ -643,7 +655,7 @@ module GPTK
     # @todo
     #   - Add support for fallback mechanisms when one or more agents fail.
     #   - Enhance error handling for Gemini API interactions.
-    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments])
+    def generate_chapter(general_prompt, thread_id: nil, assistant_id: nil, fragments: CONFIG[:chapter_fragments], post_prompt: nil)
       raise "Error: 'fragments' is nil!" unless fragments
       messages = [] if @chatgpt_client
       chapter = []
@@ -717,6 +729,7 @@ module GPTK
 
       (1..fragments).each do |i|
         prompt = build_prompt general_prompt, i
+        prompt << "\n\n#{post_prompt}" if post_prompt
         puts "Generating fragment #{i} using #{@agent}..."
 
         if @chatgpt_client # Using the Assistant API

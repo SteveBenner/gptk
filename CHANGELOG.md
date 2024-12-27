@@ -5,6 +5,8 @@ Note - Every reference to modules and classes assumes we are operating under the
 ## 0.16
 - Toughened up Grok error handling so that it doesn't result in an infinite loop on a JSON parse error. It can now run safely in the background.
 - Fixed an error in `Book#generate`
+- Updated `Book#generate` and `Book#generate_chapter` to take a optional custom prompt parameter `post_prompt`.
+- Revised the ChatGPT assistant thread code to be self-contained within the `AI` module.
 
 ## 0.15 - 2024.12.18
 - Added [`README.md`](README.md) (finally).

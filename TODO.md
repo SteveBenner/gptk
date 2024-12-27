@@ -1,7 +1,4 @@
 # TODO:
-- add bundler
-- parse chapter using pragmatic segmenter and find patterns of DUPLICATE TEXT, and flag them, create a .docx
-- fix Gemini cache usage!!!
 - 'mad libs' parsing code
 - update revision method with a new sub-option 'prompted revision' where user inputs a prompt informing the AI how to revise the content
 - 'post-op' filters (#43 operation); becomes a function within the 'Edit' tab
@@ -15,6 +12,7 @@
 
 ### Research:
 - Gemini bad API call results
+- Gemini cache usage (currently not working at all)
 
 # ROADMAP:
 - Game Writer (more to come later)

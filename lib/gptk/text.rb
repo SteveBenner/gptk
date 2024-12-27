@@ -360,9 +360,15 @@ module GPTK
     end
 
     def self.clean_chapter(input_file, analysis_file, cleaned_file)
-      # Extract text from DOCX file using the docx gem
-      doc = Docx::Document.open(input_file)
-      full_text = doc.paragraphs.map(&:text).join("\n")
+      # Determine file type and extract text accordingly
+      full_text = if input_file.end_with?('.txt')
+                    File.read(input_file)
+                  elsif input_file.end_with?('.docx')
+                    doc = Docx::Document.open(input_file)
+                    doc.paragraphs.map(&:text).join("\n")
+                  else
+                    raise "Unsupported file type. Please provide a .txt or .docx file."
+                  end
 
       # Split content into sentences using Pragmatic Segmenter
       segmenter = PragmaticSegmenter::Segmenter.new(text: full_text)
@@ -374,7 +380,7 @@ module GPTK
       duplicates = sentence_count.select { |_sentence, count| count > 1 }.keys
 
       # Generate analysis file with duplicates highlighted
-      ::Caracal::Document.save(analysis_file) do |doc|
+      Caracal::Document.save(analysis_file) do |doc|
         sentences.each do |sentence|
           if duplicates.include?(sentence.strip)
             doc.p sentence.strip, color: 'FF0000', bold: true, font: 'Times New Roman', underline: false
@@ -385,7 +391,7 @@ module GPTK
       end
 
       # Generate cleaned file with duplicates removed
-      ::Caracal::Document.save(cleaned_file) do |doc|
+      Caracal::Document.save(cleaned_file) do |doc|
         seen_sentences = {}
 
         sentences.each do |sentence|

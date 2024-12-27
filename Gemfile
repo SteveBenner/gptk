@@ -3,9 +3,10 @@ source "https://rubygems.org"
 
 gem 'awesome_print' # Pretty data output
 gem 'httparty' # For manual HTTP calls
+gem 'dotenv'
 
 group :ai do
-  gem 'openai'
+  gem 'ruby-openai'
   gem 'anthropic'
 end
 

@@ -2,7 +2,7 @@ Bundler.require :default, :ai
 
 module GPTK
   # AI interfaces and tools
-  # TODO: add detection of JSON string responses which will automatically parse JSON within the API call method
+  # TODO: rewrite the interface so that cache and memory calls are self contained within GPTK::AI
   module AI
     @last_output = nil # Track the cached output of the latest operation
 
@@ -223,14 +223,37 @@ module GPTK
       # @see OpenAI::Client#runs.create
       # @see OpenAI::Client#runs.retrieve
       # @see OpenAI::Client#messages.list
-      def self.run_assistant_thread(client, thread_id, assistant_id, prompts)
-        abort 'Error: no prompts given!' if prompts.empty?
+      # TODO: recode this to be self contained
+      def self.run_assistant_thread(client, prompts)
+        raise 'Error: no prompts given!' if prompts.empty?
+
+        # Create the Assistant if it does not exist already
+        assistant_id = if client.assistants.list['data'].empty?
+                         response = client.assistants.create(
+                           parameters: {
+                             model: GPTK::AI::CONFIG[:openai_gpt_model],
+                             name: 'AI Book generator',
+                             description: 'AI Book generator',
+                             instructions: @instructions
+                           }
+                         )
+                         response['id']
+                       else
+                         client.assistants.list['data'].first['id']
+                       end
+
+        # Create the Thread
+        response = client.threads.create
+        thread_id = response['id']
+
         # Populate the thread with messages using given prompts
         if prompts.instance_of? String
-          client.messages.create thread_id: thread_id, parameters: { role: 'user', content: prompts }
+          client.messages.create thread_id: thread_id,
+                                 parameters: { role: 'user', content: prompts }
         else # Array
           prompts.each do |prompt|
-            client.messages.create thread_id: thread_id, parameters: { role: 'user', content: prompt }
+            client.messages.create thread_id: thread_id,
+                                   parameters: { role: 'user', content: prompt }
           end
         end
 
