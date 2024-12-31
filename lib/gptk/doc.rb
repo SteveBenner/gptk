@@ -6,13 +6,12 @@ module GPTK
     # Initializes a new instance of the `Doc` class.
     #
     # This constructor sets up the `Doc` object with the provided API client, output file,
-    # content, and mode. It validates the API client and initializes tracking data for
+    # and content. It validates the API client and initializes tracking data for
     # API usage metrics, including prompt tokens, completion tokens, and cached tokens.
     #
     # @param api_client [Object] The client instance used for interacting with an API. This parameter is mandatory.
     # @param output_file [String, nil] The name of the output file to save generated content. Defaults to an empty string.
     # @param content [String, nil] The content to be processed or utilized by the `Doc` instance. Optional.
-    # @param mode [String] The operational mode for the `Doc` instance. Defaults to `GPTK.mode`.
     #
     # @return [Doc] A new instance of the `Doc` class.
     #
@@ -20,8 +19,7 @@ module GPTK
     #   api_client = OpenAI::Client.new(api_key: "your_api_key")
     #   output_file = "output.txt"
     #   content = "This is a document to process."
-    #   mode = "default"
-    #   doc = Doc.new(api_client, output_file, content, mode)
+    #   doc = Doc.new(api_client, output_file, content)
     #
     # @note
     #   - The method aborts execution if the `api_client` is not provided or invalid.
@@ -30,12 +28,11 @@ module GPTK
     # @raise [Abort] If the `api_client` is not provided or invalid.
     #
     # @see OpenAI::Client
-    def initialize(api_client, output_file=nil, content=nil, mode=GPTK.mode)
+    def initialize(api_client, output_file=nil, content=nil)
       abort 'Error: invalid client!' unless api_client
       @client = api_client
       @output_file = output_file || ''
       @content = content
-      @mode = mode
       @data = { # Data points to track while utilizing APIs
         prompt_tokens: 0,
         completion_tokens: 0,

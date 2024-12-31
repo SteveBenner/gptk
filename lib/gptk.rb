@@ -1,6 +1,9 @@
 require 'json'
 require 'yaml'
 require 'base64'
+require 'fileutils'
+require 'open3'
+require 'set'
 require 'bundler'
 %w[ai book config doc text utils].each do |lib|
   print "Loading module: #{lib.capitalize}... "
@@ -11,7 +14,7 @@ end
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
   START_TIME = Time.now
-  VERSION = '0.16'.freeze
+  VERSION = '0.17'.freeze
 
   # Load configuration files
   Config.load_openai_setup

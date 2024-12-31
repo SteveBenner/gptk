@@ -300,8 +300,7 @@ module GPTK
         while bad_response
           puts 'Error: echoed response detected from ChatGPT. Retrying...'
           sleep 10
-          response = run_assistant_thread client, thread_id, assistant_id,
-                                          'Avoid repeating the input. Turn over to Claude.'
+          response = run_assistant_thread client, 'Avoid repeating the input. Turn over to Claude.'
         end
         return '' if bad_response
 

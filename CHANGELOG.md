@@ -2,7 +2,14 @@
 
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
-## 0.16
+## 0.17
+- Added `Text::remove_duplicates_from_docx` which modifies a `docx` file in place to remove duplicate sentences.
+- Added missing documentation for `Text` methods.
+- Somehow fixed an issue with `Zip` namespace clashing.
+- Added `Text::extract_numbered_items` which parses a `docx` file and returns a list of enumerated items.
+- Added `Text::extract_document_xml` which is a private helper.
+
+## 0.16 - 2024.12.30
 - Toughened up Grok error handling so that it doesn't result in an infinite loop on a JSON parse error. It can now run safely in the background.
 - Fixed an error in `Book#generate`
 - Updated `Book#generate` and `Book#generate_chapter` to take a optional custom prompt parameter `post_prompt`.

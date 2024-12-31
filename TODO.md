@@ -10,9 +10,14 @@
 - Track token usage
   - send notifications at specified increments of token usage (count and $ value)
 
+### Transformations:
+- #### Git hooks
+  - on file added: fix file name formatting
+
 ### Research:
 - Gemini bad API call results
 - Gemini cache usage (currently not working at all)
+- Look into Grok overloading with output
 
 # ROADMAP:
 - Game Writer (more to come later)
