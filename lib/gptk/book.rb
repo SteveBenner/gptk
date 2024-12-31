@@ -101,7 +101,6 @@ module GPTK
                    parsers: CONFIG[:parsers])
       unless chatgpt_client || claude_client || xai_api_key || google_api_key
         raise 'Error: You must pass in at least ONE AI agent client or API key to the `new` method.'
-        return
       end
       @chatgpt_client = chatgpt_client
       @claude_client = claude_client
@@ -525,7 +524,7 @@ module GPTK
     #
     # === Internal Caching
     # - The last generated chapter and the full set of chapters are cached in `@last_output` and `@book`, respectively.
-    def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1)
+    def generate_zipper(number_of_chapters = CONFIG[:num_chapters], fragments = 1, post_prompmt: nil)
       start_time = Time.now
       CONFIG[:num_chapters] = number_of_chapters # Update config
       chapters = []
@@ -534,6 +533,7 @@ module GPTK
         puts 'Sending initial prompt, and GPT instructions...'
 
         prompt = "The following text is the outline for a #{@genre} novel I am about to generate. Use it as reference when processing future requests, and refer to it explicitly when generating each chapter of the book:\n\nFINAL OUTLINE:\n\n#{@outline}\n\nEND OF FINAL OUTLINE"
+        prompt << "\n\n#{post_prompmt}" if post_prompmt
 
         if @chatgpt_client
           # Create the Assistant if it does not exist already
@@ -939,7 +939,7 @@ module GPTK
                              end
         chapter << if parity.zero? # ChatGPT
                      parity = 1
-                     fragment_text = GPTK::AI::ChatGPT.run_assistant_thread @chatgpt_client, thread_id, assistant_id, chapter_gen_prompt
+                     fragment_text = GPTK::AI::ChatGPT.run_assistant_thread @chatgpt_client, chapter_gen_prompt
                      claude_memory[:content].first[:text] << "\n\nCHAPTER #{chapter_num}, FRAGMENT #{j}:\n\n#{fragment_text}"
                      fragment_text
                    else # Claude
