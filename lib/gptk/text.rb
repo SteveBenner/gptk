@@ -4,6 +4,195 @@ require 'zip'
 
 module GPTK
   module Text
+    # todo: refactor lib
+    module Parse
+      # Parses a formatted string into a hash of categories with titles and descriptions.
+      #
+      # This method processes a formatted string of categories, extracting each category's number,
+      # title, and description. It returns a hash where the keys are category numbers and the values
+      # are hashes containing the title and description of each category. If parsing fails, it logs
+      # an error message and returns `nil`.
+      #
+      # @param text [String] The input text containing formatted categories.
+      #   - Categories should be prefixed with `**<number>\.` and contain a title and description.
+      #
+      # @return [Hash{Integer => Hash{title: String, description: String}}]
+      #   A hash where keys are category numbers and values are hashes with `:title` and `:description`.
+      #   Returns `nil` if parsing fails.
+      #
+      # @example Parsing categories from a formatted string:
+      #   input = <<~TEXT
+      #     **1\\.** Category One ** Description of category one.
+      #     **2\\.** Category Two ** Description of category two.
+      #   TEXT
+      #
+      #   Text.parse_categories_str(input)
+      #   # => {
+      #   #      1 => { title: "Category One", description: "Description of category one." },
+      #   #      2 => { title: "Category Two", description: "Description of category two." }
+      #   #    }
+      #
+      # @example Handling invalid input:
+      #   input = "This text does not follow the category format."
+      #   Text.parse_categories_str(input)
+      #   # => Logs error: "Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str`."
+      #   # => nil
+      #
+      # @note
+      #   - Categories are expected to follow the pattern: `**<number>\.` followed by a title and description.
+      #   - If no valid categories are detected, the method logs an error and returns `nil`.
+      #   - The method uses regular expressions to extract category details.
+      #
+      # @raise [RuntimeError] If individual category parsing fails during iteration.
+      #
+      # @see String#split
+      # @see Regexp
+      def self.categories_str(text)
+        sorted_categories = text.split(/(?=\*\*\d+\\\.)/)
+        if sorted_categories.size == 1
+          puts 'Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str`.'
+          return nil
+        end
+        sorted_categories.reduce({}) do |output, category|
+          if category =~ /\*\*(\d+)\\\.\s*(.*?)\*\*\s*(.*)/m
+            number = $1.to_i
+            title = $2.strip
+            description = $3.strip
+            output[number] = { title: title, description: description }
+          else
+            puts 'Error: parsing categories failed!'
+            nil
+          end
+          output
+        end
+      end
+
+      # Parses text containing numbered categories and subpoints into a structured hash.
+      #
+      # This method processes a text input with numbered categories and subpoints, organizing the data
+      # into a hash. Each category title is a key, and its associated subpoints are stored as an array
+      # of strings. Additional lines following a subpoint are appended to that subpoint.
+      #
+      # @param text [String] The input text to parse, containing numbered categories and subpoints.
+      #
+      # @return [Hash{String => Array<String>}]
+      #   A hash where the keys are category titles (e.g., "#1: Title") and the values are arrays of
+      #   subpoints associated with each category.
+      #
+      # @example Parsing categories and subpoints:
+      #   input = <<~TEXT
+      #     #1: Category One
+      #     1. First subpoint of category one
+      #     2. Second subpoint of category one
+      #
+      #     #2: Category Two
+      #     1. First subpoint of category two
+      #     Additional details for the first subpoint.
+      #   TEXT
+      #
+      #   Text.parse_numbered_categories(input)
+      #   # => {
+      #   #      "#1: Category One" => ["First subpoint of category one", "Second subpoint of category one"],
+      #   #      "#2: Category Two" => ["First subpoint of category two Additional details for the first subpoint."]
+      #   #    }
+      #
+      # @example Handling text without categories or subpoints:
+      #   input = "This text does not follow the numbered category format."
+      #   Text.parse_numbered_categories(input)
+      #   # => {}
+      #
+      # @note
+      #   - Titles are identified by the pattern `#<number>: Title`.
+      #   - Subpoints are identified by the pattern `<number>. Subpoint text`.
+      #   - Additional lines following a subpoint are appended to the last subpoint.
+      #   - If no valid categories or subpoints are found, the method returns an empty hash.
+      #
+      # @see String#each_line
+      # @see Regexp
+      def self.numbered_categories(text)
+        result = {}
+        current_title = nil
+
+        # Regex for matching numbered titles (e.g., #1: “Title”)
+        title_regex = /^#\d+:\s*.+$/
+        # Regex for matching numbered subpoints (e.g., 1. Subpoint text)
+        subpoint_regex = /^(\d+)\.\s+(.+)$/
+
+        text.each_line do |line|
+          line.strip!
+          next if line.empty?
+
+          if line.match?(title_regex)
+            # Match a new title
+            current_title = line
+            result[current_title] = []
+          elsif (match = line.match(subpoint_regex))
+            # Match a new subpoint
+            result[current_title] << match[2].strip if current_title
+          elsif current_title && result[current_title].any?
+            # Append additional lines to the last subpoint
+            result[current_title][-1] += " #{line}" if result[current_title][-1]
+          end
+        end
+
+        result
+      end
+
+      def self.paragraphs_from_docx(file_path)
+        paragraphs = []
+
+        # Open the .docx file as a zip archive
+        Zip::File.open(file_path) do |zip_file|
+          entry = zip_file.find_entry('word/document.xml')
+          if entry
+            xml_content = entry.get_input_stream.read
+
+            # Extract paragraphs based on XML structure
+            # Paragraphs are enclosed within `<w:p>` tags
+            xml_content.scan(/<w:p.*?>(.*?)<\/w:p>/m).each do |match|
+              paragraph_content = match[0].scan(/<w:t.*?>(.*?)<\/w:t>/).flatten.join(' ')
+              paragraphs << paragraph_content.strip unless paragraph_content.empty?
+            end
+          end
+        end
+
+        paragraphs
+      end
+
+      def self.parse_paragraphs_with_formatting(file_path)
+        paragraphs = []
+
+        # Open the .docx file as a zip archive
+        Zip::File.open(file_path) do |zip_file|
+          entry = zip_file.find_entry('word/document.xml')
+          if entry
+            xml_content = entry.get_input_stream.read
+            doc = Nokogiri::XML(xml_content)
+
+            # Extract paragraphs with formatting
+            doc.xpath('//w:p').each do |paragraph|
+              formatted_texts = paragraph.xpath('.//w:r').map do |run|
+                text = run.at_xpath('.//w:t')&.text
+                next unless text
+
+                bold = run.at_xpath('.//w:b') ? true : false
+                color = run.at_xpath('.//w:color')&.[]('w:val')
+                { text: text.strip, bold: bold, color: color } # Normalize text
+              end
+
+              # Combine all the formatted text in the paragraph
+              formatted_texts.compact!
+              paragraphs << formatted_texts unless formatted_texts.empty?
+            end
+          end
+        end
+
+        paragraphs
+      end
+    end
+
+    # Utility methods
+
     # Calculates the number of words in a given text.
     #
     # This method counts the words in the provided text by splitting it on whitespace.
@@ -28,6 +217,8 @@ module GPTK
       text.split(/\s+/).count
     end
 
+    # Output methods
+
     # Adds sequential numbering to sentences in a text, with special labeling for quoted content.
     #
     # This method processes the input text by splitting it into paragraphs and sentences.
@@ -46,7 +237,7 @@ module GPTK
     #     This is the second paragraph. "Another quote with multiple sentences. Here's the second."
     #   TEXT
     #
-    #   Text.number_text(input)
+    #   Text.numberize_sentences(input)
     #   # => "**[1]** This is the first paragraph. \"**[2]** **[A]** This is a quoted sentence.\""
     #   #    "\n\n**[3]** This is the second paragraph. \"**[4]** **[A]** Another quote with multiple sentences. **[B]** Here's the second.\""
     #
@@ -57,7 +248,7 @@ module GPTK
     #   - The method preserves paragraph breaks in the output.
     #
     # @see PragmaticSegmenter::Segmenter
-    def self.number_text(text)
+    def self.numberize_sentences(text)
       # Split the text into paragraphs by double newlines
       paragraphs = text.split(/\n\n+/)
       sentence_count = 0
@@ -105,138 +296,6 @@ module GPTK
 
       # Join the numbered paragraphs with double newlines
       numbered_paragraphs.join("\n\n")
-    end
-
-    # Parses a formatted string into a hash of categories with titles and descriptions.
-    #
-    # This method processes a formatted string of categories, extracting each category's number,
-    # title, and description. It returns a hash where the keys are category numbers and the values
-    # are hashes containing the title and description of each category. If parsing fails, it logs
-    # an error message and returns `nil`.
-    #
-    # @param text [String] The input text containing formatted categories.
-    #   - Categories should be prefixed with `**<number>\.` and contain a title and description.
-    #
-    # @return [Hash{Integer => Hash{title: String, description: String}}]
-    #   A hash where keys are category numbers and values are hashes with `:title` and `:description`.
-    #   Returns `nil` if parsing fails.
-    #
-    # @example Parsing categories from a formatted string:
-    #   input = <<~TEXT
-    #     **1\\.** Category One ** Description of category one.
-    #     **2\\.** Category Two ** Description of category two.
-    #   TEXT
-    #
-    #   Text.parse_categories_str(input)
-    #   # => {
-    #   #      1 => { title: "Category One", description: "Description of category one." },
-    #   #      2 => { title: "Category Two", description: "Description of category two." }
-    #   #    }
-    #
-    # @example Handling invalid input:
-    #   input = "This text does not follow the category format."
-    #   Text.parse_categories_str(input)
-    #   # => Logs error: "Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str`."
-    #   # => nil
-    #
-    # @note
-    #   - Categories are expected to follow the pattern: `**<number>\.` followed by a title and description.
-    #   - If no valid categories are detected, the method logs an error and returns `nil`.
-    #   - The method uses regular expressions to extract category details.
-    #
-    # @raise [RuntimeError] If individual category parsing fails during iteration.
-    #
-    # @see String#split
-    # @see Regexp
-    def self.parse_categories_str(text)
-      sorted_categories = text.split(/(?=\*\*\d+\\\.)/)
-      if sorted_categories.size == 1
-        puts 'Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str`.'
-        return nil
-      end
-      sorted_categories.reduce({}) do |output, category|
-        if category =~ /\*\*(\d+)\\\.\s*(.*?)\*\*\s*(.*)/m
-          number = $1.to_i
-          title = $2.strip
-          description = $3.strip
-          output[number] = { title: title, description: description }
-        else
-          puts 'Error: parsing categories failed!'
-          nil
-        end
-        output
-      end
-    end
-
-    # Parses text containing numbered categories and subpoints into a structured hash.
-    #
-    # This method processes a text input with numbered categories and subpoints, organizing the data
-    # into a hash. Each category title is a key, and its associated subpoints are stored as an array
-    # of strings. Additional lines following a subpoint are appended to that subpoint.
-    #
-    # @param text [String] The input text to parse, containing numbered categories and subpoints.
-    #
-    # @return [Hash{String => Array<String>}]
-    #   A hash where the keys are category titles (e.g., "#1: Title") and the values are arrays of
-    #   subpoints associated with each category.
-    #
-    # @example Parsing categories and subpoints:
-    #   input = <<~TEXT
-    #     #1: Category One
-    #     1. First subpoint of category one
-    #     2. Second subpoint of category one
-    #
-    #     #2: Category Two
-    #     1. First subpoint of category two
-    #     Additional details for the first subpoint.
-    #   TEXT
-    #
-    #   Text.parse_numbered_categories(input)
-    #   # => {
-    #   #      "#1: Category One" => ["First subpoint of category one", "Second subpoint of category one"],
-    #   #      "#2: Category Two" => ["First subpoint of category two Additional details for the first subpoint."]
-    #   #    }
-    #
-    # @example Handling text without categories or subpoints:
-    #   input = "This text does not follow the numbered category format."
-    #   Text.parse_numbered_categories(input)
-    #   # => {}
-    #
-    # @note
-    #   - Titles are identified by the pattern `#<number>: Title`.
-    #   - Subpoints are identified by the pattern `<number>. Subpoint text`.
-    #   - Additional lines following a subpoint are appended to the last subpoint.
-    #   - If no valid categories or subpoints are found, the method returns an empty hash.
-    #
-    # @see String#each_line
-    # @see Regexp
-    def self.parse_numbered_categories(text)
-      result = {}
-      current_title = nil
-
-      # Regex for matching numbered titles (e.g., #1: “Title”)
-      title_regex = /^#\d+:\s*.+$/
-      # Regex for matching numbered subpoints (e.g., 1. Subpoint text)
-      subpoint_regex = /^(\d+)\.\s+(.+)$/
-
-      text.each_line do |line|
-        line.strip!
-        next if line.empty?
-
-        if line.match?(title_regex)
-          # Match a new title
-          current_title = line
-          result[current_title] = []
-        elsif (match = line.match(subpoint_regex))
-          # Match a new subpoint
-          result[current_title] << match[2].strip if current_title
-        elsif current_title && result[current_title].any?
-          # Append additional lines to the last subpoint
-          result[current_title][-1] += " #{line}" if result[current_title][-1]
-        end
-      end
-
-      result
     end
 
     # Formats and prints a list of matches with details such as pattern, sentence, and revisions.
@@ -322,66 +381,6 @@ module GPTK
       str
     end
 
-    def self.parse_paragraphs_from_docx(file_path)
-      paragraphs = []
-
-      # Open the .docx file as a zip archive
-      Zip::File.open(file_path) do |zip_file|
-        entry = zip_file.find_entry('word/document.xml')
-        if entry
-          xml_content = entry.get_input_stream.read
-
-          # Extract paragraphs based on XML structure
-          # Paragraphs are enclosed within `<w:p>` tags
-          xml_content.scan(/<w:p.*?>(.*?)<\/w:p>/m).each do |match|
-            paragraph_content = match[0].scan(/<w:t.*?>(.*?)<\/w:t>/).flatten.join(' ')
-            paragraphs << paragraph_content.strip unless paragraph_content.empty?
-          end
-        end
-      end
-
-      paragraphs
-    end
-
-    # Parse paragraphs with formatting
-    def self.parse_paragraphs_with_formatting(file_path)
-      paragraphs = []
-
-      # Open the .docx file as a zip archive
-      Zip::File.open(file_path) do |zip_file|
-        entry = zip_file.find_entry('word/document.xml')
-        if entry
-          xml_content = entry.get_input_stream.read
-          doc = Nokogiri::XML(xml_content)
-
-          # Extract paragraphs with formatting
-          doc.xpath('//w:p').each do |paragraph|
-            formatted_texts = paragraph.xpath('.//w:r').map do |run|
-              text = run.at_xpath('.//w:t')&.text
-              next unless text
-
-              bold = run.at_xpath('.//w:b') ? true : false
-              color = run.at_xpath('.//w:color')&.[]('w:val')
-              { text: text.strip, bold: bold, color: color } # Normalize text
-            end
-
-            # Combine all the formatted text in the paragraph
-            formatted_texts.compact!
-            paragraphs << formatted_texts unless formatted_texts.empty?
-          end
-        end
-      end
-
-      paragraphs
-    end
-
-    # Normalize paragraphs for deduplication
-    def self.normalize_paragraph(paragraph)
-      # Combine all text parts into a single normalized string
-      paragraph.map { |part| part[:text].gsub(/\s+/, ' ').strip }.join(' ').downcase
-    end
-
-    # Remove duplicate paragraphs while retaining formatting
     def self.remove_duplicate_paragraphs(input_file, output_file)
       # Parse paragraphs from the input file
       paragraphs = parse_paragraphs_with_formatting(input_file)
@@ -468,7 +467,7 @@ module GPTK
       puts "Cleaned document with formatting saved to #{::File.expand_path output_filename}"
     end
 
-    def self.clean_chapter(input_file, analysis_file, cleaned_file)
+    def self.clean_and_analyze_chapter(input_file, analysis_file, cleaned_file)
       # Determine file type and extract text accordingly
       full_text = if input_file.end_with?('.txt')
                     File.read(input_file)
@@ -586,7 +585,7 @@ module GPTK
     def self.extract_numbered_items(docx_path)
       raise 'Input must be a .docx file' unless docx_path.end_with?('.docx')
 
-      document_xml = extract_document_xml(docx_path)
+      document_xml = GPTK::Doc.extract_document_xml(docx_path)
       doc = Nokogiri::XML(document_xml)
 
       items = []
@@ -605,12 +604,8 @@ module GPTK
 
     private
 
-    def self.extract_document_xml(docx_path)
-      Zip::File.open(docx_path) do |zip_file|
-        entry = zip_file.find_entry('word/document.xml')
-        raise 'document.xml not found in .docx file' unless entry
-        return entry.get_input_stream.read
-      end
+    def self.normalize_paragraph(paragraph)
+      paragraph.map { |part| part[:text].gsub(/\s+/, ' ').strip }.join(' ').downcase
     end
   end
 end

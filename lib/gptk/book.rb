@@ -1348,7 +1348,7 @@ module GPTK
       start_time = Time.now
       revisions = []
       revised_chapter_text = chapter_text
-      numbered_chapter_text = GPTK::Text.number_text revised_chapter_text
+      numbered_chapter_text = GPTK::Text.numberize_sentences revised_chapter_text
 
       begin
         # Scan the chapter for instances of given pattern and offer the user choice in how to address matches

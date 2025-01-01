@@ -702,14 +702,14 @@ module GPTK
       puts "Categorizing #{items.count} items..."
       i = 0
       results = items.group_by do |item|
-        prompt = "Based on the following categories:\n\n#{categories}\n\nPlease categorize the following prompt:\n\n#{item}\n\nPlease return JUST the category number, and no other output text."
+        prompt = "Based on the following categories:\n\n#{categories}\n\nPlease categorize the following item:\n\n#{item}\n\nPlease return JUST the category number, and no other output text."
         # Send the prompt to the AI using the chat API, and retrieve the response
         begin
-          content = ChatGPT.query doc.client, prompt, doc.data
+          content = ChatGPT.query doc.client, doc.data, prompt
         rescue StandardError => e
           puts "Error: #{e.class}: #{e.message}"
           puts 'Please try operation again, or review the code.'
-          puts 'Last operation response:'
+          puts 'Last operation response: '
           print content
           return content
         end
@@ -719,7 +719,8 @@ module GPTK
         content.to_i
       end
       puts 'Error: no output!' unless results && !results.empty?
-      puts "Successfully categorized #{results.values.reduce(0) {|j, loe| j += loe.count; j }} items!"
+      result_count = results.values.reduce(0) {|j, loe| j += loe.count; j }
+      puts "Successfully categorized #{result_count} items in #{results.keys.count} categories!"
       @last_output = results # Cache results of the complete operation
       results
     end

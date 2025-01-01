@@ -4,10 +4,13 @@ Note - Every reference to modules and classes assumes we are operating under the
 
 ## 0.17
 - Added `Text::remove_duplicates_from_docx` which modifies a `docx` file in place to remove duplicate sentences.
-- Added missing documentation for `Text` methods.
+- Added missing documentation for `Text` and `Doc` module methods.
 - Somehow fixed an issue with `Zip` namespace clashing.
 - Added `Text::extract_numbered_items` which parses a `docx` file and returns a list of enumerated items.
 - Added `Text::extract_document_xml` which is a private helper.
+- Fixed bad param calls using `AI` methods.
+- Other minor fixes.
+- Refactored the `Text` and `Doc` modules so methods are in their proper places.
 
 ## 0.16 - 2024.12.30
 - Toughened up Grok error handling so that it doesn't result in an infinite loop on a JSON parse error. It can now run safely in the background.

@@ -10,16 +10,15 @@ module GPTK
     # API usage metrics, including prompt tokens, completion tokens, and cached tokens.
     #
     # @param api_client [Object] The client instance used for interacting with an API. This parameter is mandatory.
-    # @param output_file [String, nil] The name of the output file to save generated content. Defaults to an empty string.
+    # @param file_path [String, nil] The name of the output file to save generated content.
     # @param content [String, nil] The content to be processed or utilized by the `Doc` instance. Optional.
     #
     # @return [Doc] A new instance of the `Doc` class.
     #
-    # @example Creating a `Doc` instance with an API client:
-    #   api_client = OpenAI::Client.new(api_key: "your_api_key")
-    #   output_file = "output.txt"
+    # @example Creating a `Doc` instance with a file path and content:
+    #   file_path = "output.txt"
     #   content = "This is a document to process."
-    #   doc = Doc.new(api_client, output_file, content)
+    #   doc = Doc.new(file_path, content)
     #
     # @note
     #   - The method aborts execution if the `api_client` is not provided or invalid.
@@ -28,10 +27,8 @@ module GPTK
     # @raise [Abort] If the `api_client` is not provided or invalid.
     #
     # @see OpenAI::Client
-    def initialize(api_client, output_file=nil, content=nil)
-      abort 'Error: invalid client!' unless api_client
-      @client = api_client
-      @output_file = output_file || ''
+    def initialize(file_path, content = nil)
+      @output_file = GPTK::Utils.fname_increment file_path
       @content = content
       @data = { # Data points to track while utilizing APIs
         prompt_tokens: 0,
@@ -60,6 +57,7 @@ module GPTK
     #
     # @example Composing a document:
     #   title = "The Great Adventure"
+    #   file_path = "output.docx"
     #   chapters = {
     #     1 => { title: "The Beginning", description: "An introduction to the story." },
     #     2 => { title: "The Journey", description: "The challenges and triumphs along the way." }
@@ -68,7 +66,7 @@ module GPTK
     #     1 => ["Once upon a time...", "It was a dark and stormy night."],
     #     2 => ["They climbed the highest mountain.", "Victory was in sight."]
     #   }
-    #   doc = Doc.new(api_client)
+    #   doc = Doc.new(file_path)
     #   doc.create_doc1(title, chapters, content)
     #   # => "# The Great Adventure\n\n## The Beginning\nAn introduction to the story.\n\n\nOnce upon a time...\nIt was a dark and stormy night.\n\n\n## The Journey\nThe challenges and triumphs along the way.\n\n\nThey climbed the highest mountain.\nVictory was in sight.\n\n\n"
     #
@@ -106,12 +104,12 @@ module GPTK
     #   Outputs messages to the console indicating the status of the save operation.
     #
     # @example Saving document content:
-    #   doc = Doc.new(api_client, "output.txt", "This is the document content.")
+    #   doc = Doc.new("output.txt", "This is the document content.")
     #   doc.save
     #   # => "Writing document content to file: output.txt"
     #
     # @example Saving the results of the last operation:
-    #   doc = Doc.new(api_client, "output.txt")
+    #   doc = Doc.new("output.txt")
     #   doc.create_doc1("Title", chapters, content)
     #   doc.save
     #   # => "Writing document content to file: output_1.txt"
@@ -131,10 +129,17 @@ module GPTK
         puts 'Error: no document content or last operation results found!'
         puts 'Perform an operation or assign a value to the Doc `content` variable.'
       end
-      filepath = ::File.exist?(@output_file) ? GPTK::File.fname_increment(@output_file) : @output_file
       content = @content || @last_output
-      puts "Writing document content to file: #{filepath}"
-      ::File.write filepath, content
+      puts "Writing document content to file: #{@output_file}"
+      File.write @output_file, content
+    end
+
+    def self.extract_document_xml(docx_path)
+      Zip::File.open(docx_path) do |zip_file|
+        entry = zip_file.find_entry('word/document.xml')
+        raise 'document.xml not found in .docx file' unless entry
+        return entry.get_input_stream.read
+      end
     end
   end
 end
