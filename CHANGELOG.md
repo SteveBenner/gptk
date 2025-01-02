@@ -10,7 +10,9 @@ Note - Every reference to modules and classes assumes we are operating under the
 - Added `Text::extract_document_xml` which is a private helper.
 - Fixed bad param calls using `AI` methods.
 - Other minor fixes.
-- Refactored the `Text` and `Doc` modules so methods are in their proper places.
+- Refactored the `Text` and `Doc` modules so methods are in their proper places. Added `Parse` module in `Text` to encapsulate parsing methods.
+- Updated `Doc#new` to take `file_path` and `content` as parameters.
+- Finished documenting `Text` and `Doc` modules.
 
 ## 0.16 - 2024.12.30
 - Toughened up Grok error handling so that it doesn't result in an infinite loop on a JSON parse error. It can now run safely in the background.
@@ -47,7 +49,7 @@ Note - Every reference to modules and classes assumes we are operating under the
 - Added helper `Book#to_s` which outputs the entire book content in a readable string format.
 
 ## 0.11 - 2024.12.12
-- Added `Text::parse_numbered_categories` which parses text and outputs a Hash of all the numbered categories and their subcategories and text values
+- Added `Text::Parse.numbered_categories` which parses text and outputs a Hash of all the numbered categories and their subcategories and text values
 - COMPLETELY rewrote the revision code. Revised `Book#revise_chapter` so that it is now a single outer proxy for all revision strategies
 - Added `Book#revise_chapter_content` which contains the lower level logic for implementing chapter revisions
 - Added `Book#analyze_text` which is a middle-man for processing text and generating pattern matches for processing.

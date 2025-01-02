@@ -4,7 +4,6 @@ require 'zip'
 
 module GPTK
   module Text
-    # todo: refactor lib
     module Parse
       # Parses a formatted string into a hash of categories with titles and descriptions.
       #
@@ -26,7 +25,7 @@ module GPTK
       #     **2\\.** Category Two ** Description of category two.
       #   TEXT
       #
-      #   Text.parse_categories_str(input)
+      #   Text::Parse.categories_str(input)
       #   # => {
       #   #      1 => { title: "Category One", description: "Description of category one." },
       #   #      2 => { title: "Category Two", description: "Description of category two." }
@@ -34,8 +33,8 @@ module GPTK
       #
       # @example Handling invalid input:
       #   input = "This text does not follow the category format."
-      #   Text.parse_categories_str(input)
-      #   # => Logs error: "Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str`."
+      #   Text::Parse.categories_str(input)
+      #   # => Logs error: "Error: failed to parse category text! Please review `GPTK::Text::Parse.categories_str`."
       #   # => nil
       #
       # @note
@@ -50,7 +49,7 @@ module GPTK
       def self.categories_str(text)
         sorted_categories = text.split(/(?=\*\*\d+\\\.)/)
         if sorted_categories.size == 1
-          puts 'Error: failed to parse category text! Please review `GPTK::Text.parse_categories_str`.'
+          puts 'Error: failed to parse category text! Please review `GPTK::Text::Parse.categories_str`.'
           return nil
         end
         sorted_categories.reduce({}) do |output, category|
@@ -90,7 +89,7 @@ module GPTK
       #     Additional details for the first subpoint.
       #   TEXT
       #
-      #   Text.parse_numbered_categories(input)
+      #   Text::Parse.numbered_categories(input)
       #   # => {
       #   #      "#1: Category One" => ["First subpoint of category one", "Second subpoint of category one"],
       #   #      "#2: Category Two" => ["First subpoint of category two Additional details for the first subpoint."]
@@ -98,7 +97,7 @@ module GPTK
       #
       # @example Handling text without categories or subpoints:
       #   input = "This text does not follow the numbered category format."
-      #   Text.parse_numbered_categories(input)
+      #   Text::Parse.numbered_categories(input)
       #   # => {}
       #
       # @note
@@ -138,6 +137,21 @@ module GPTK
         result
       end
 
+      # Extracts paragraphs from a `.docx` file.
+      #
+      # This method reads a `.docx` file (treated as a ZIP archive), extracts the main document XML (`word/document.xml`),
+      # and parses the paragraphs enclosed within `<w:p>` tags. Text within these paragraphs is extracted from `<w:t>` tags.
+      #
+      # @param [String] file_path The path to the `.docx` file.
+      # @return [Array<String>] An array of paragraphs, with each paragraph as a string. Empty paragraphs are excluded.
+      # @raise [Zip::Error] If the file is not a valid ZIP archive.
+      # @raise [Errno::ENOENT] If the specified file does not exist.
+      # @raise [Nokogiri::XML::SyntaxError] If the XML structure is malformed.
+      #
+      # @example Extract paragraphs from a `.docx` file
+      #   paragraphs = self.paragraphs_from_docx("example.docx")
+      #   paragraphs.each { |para| puts para }
+      #
       def self.paragraphs_from_docx(file_path)
         paragraphs = []
 
@@ -159,7 +173,31 @@ module GPTK
         paragraphs
       end
 
-      def self.parse_paragraphs_with_formatting(file_path)
+      # Extracts paragraphs with formatting information from a `.docx` file.
+      #
+      # This method reads a `.docx` file (treated as a ZIP archive), extracts the main document XML (`word/document.xml`),
+      # and parses paragraphs enclosed within `<w:p>` tags. For each paragraph, it extracts text along with formatting
+      # attributes such as bold and color from `<w:r>` (run) tags.
+      #
+      # @param [String] file_path The path to the `.docx` file.
+      # @return [Array<Array<Hash>>] An array of paragraphs, where each paragraph is an array of hashes.
+      #   Each hash contains the text and its formatting attributes:
+      #   - `:text` [String] The text content.
+      #   - `:bold` [Boolean] Whether the text is bold.
+      #   - `:color` [String, nil] The color of the text (hexadecimal or OpenXML color name), or `nil` if not specified.
+      # @raise [Zip::Error] If the file is not a valid ZIP archive.
+      # @raise [Errno::ENOENT] If the specified file does not exist.
+      # @raise [Nokogiri::XML::SyntaxError] If the XML structure is malformed.
+      #
+      # @example Extract paragraphs with formatting from a `.docx` file
+      #   paragraphs = self.paragraphs_with_formatting_from_docx("example.docx")
+      #   paragraphs.each do |paragraph|
+      #     paragraph.each do |text|
+      #       puts "Text: #{text[:text]}, Bold: #{text[:bold]}, Color: #{text[:color]}"
+      #     end
+      #   end
+      #
+      def self.paragraphs_with_formatting_from_docx(file_path)
         paragraphs = []
 
         # Open the .docx file as a zip archive
@@ -191,8 +229,6 @@ module GPTK
       end
     end
 
-    # Utility methods
-
     # Calculates the number of words in a given text.
     #
     # This method counts the words in the provided text by splitting it on whitespace.
@@ -217,7 +253,28 @@ module GPTK
       text.split(/\s+/).count
     end
 
-    # Output methods
+    # Normalizes a paragraph by combining its parts into a single, lowercased string with extra spaces removed.
+    #
+    # This method processes a paragraph, which is represented as an array of hashes where each hash contains
+    # text and potentially other formatting attributes. It extracts the text from each part, removes extra spaces,
+    # joins the parts into a single string, and converts it to lowercase.
+    #
+    # @param [Array<Hash>] paragraph An array of hashes representing parts of a paragraph. Each hash must include:
+    #   - `:text` [String] The text content of the part.
+    # @return [String] A single, normalized string representing the entire paragraph.
+    #
+    # @example Normalize a paragraph
+    #   paragraph = [
+    #     { text: " This is the first part " },
+    #     { text: "of the paragraph." }
+    #   ]
+    #   normalized = self.normalize_paragraph(paragraph)
+    #   puts normalized
+    #   # Output: "this is the first part of the paragraph."
+    #
+    def self.normalize_paragraph(paragraph)
+      paragraph.map { |part| part[:text].gsub(/\s+/, ' ').strip }.join(' ').downcase
+    end
 
     # Adds sequential numbering to sentences in a text, with special labeling for quoted content.
     #
@@ -248,6 +305,7 @@ module GPTK
     #   - The method preserves paragraph breaks in the output.
     #
     # @see PragmaticSegmenter::Segmenter
+    #
     def self.numberize_sentences(text)
       # Split the text into paragraphs by double newlines
       paragraphs = text.split(/\n\n+/)
@@ -379,233 +437,6 @@ module GPTK
         str << "\n"
       end
       str
-    end
-
-    def self.remove_duplicate_paragraphs(input_file, output_file)
-      # Parse paragraphs from the input file
-      paragraphs = parse_paragraphs_with_formatting(input_file)
-
-      # Remove duplicates while maintaining the original order
-      unique_paragraphs = []
-      seen = {}
-      paragraphs.each do |paragraph|
-        normalized_text = normalize_paragraph(paragraph)
-        unless seen[normalized_text]
-          unique_paragraphs << paragraph
-          seen[normalized_text] = true
-        end
-      end
-
-      # Write cleaned content to a new .docx file
-      Caracal::Document.save(output_file) do |doc|
-        unique_paragraphs.each do |paragraph|
-          doc.p do
-            paragraph.each do |part|
-              doc.p part[:text], bold: part[:bold], color: part[:color] || '000000'
-            end
-          end
-        end
-      end
-
-      puts "Cleaned document with formatting saved to #{output_file}"
-    end
-
-    def self.clean_chapter_text(input_text, output_filename)
-      # Normalize and split input text into paragraphs
-      paragraphs = input_text.split(/\n+/).map(&:strip).reject(&:empty?)
-
-      # Hash to track processed paragraphs to avoid duplication
-      processed_paragraph_hashes = {}
-
-      # Analyze for duplicate sentences
-      segmenter = PragmaticSegmenter::Segmenter.new(text: input_text)
-      sentences = segmenter.segment
-
-      # Use a hash to detect duplicate sentences
-      sentence_hashes = {}
-      duplicates = {}
-
-      sentences.each do |sentence|
-        normalized_sentence = sentence.strip.downcase
-        hash = Digest::SHA256.hexdigest(normalized_sentence)
-        if sentence_hashes.key?(hash)
-          duplicates[sentence] = true
-        else
-          sentence_hashes[hash] = true
-        end
-      end
-
-      # Generate the Word document with formatting
-      Caracal::Document.save(output_filename) do |doc|
-        paragraphs.each do |paragraph|
-          # Compute a hash of the normalized paragraph for deduplication
-          paragraph_hash = Digest::SHA256.hexdigest(paragraph.strip.downcase)
-
-          # Skip if paragraph is already processed
-          next if processed_paragraph_hashes.key?(paragraph_hash)
-
-          # Mark paragraph as processed
-          processed_paragraph_hashes[paragraph_hash] = true
-
-          # Process each paragraph
-          segmenter = PragmaticSegmenter::Segmenter.new(text: paragraph)
-          paragraph_sentences = segmenter.segment
-
-          # Add the paragraph to the document
-          doc.p do
-            paragraph_sentences.each do |sentence|
-              if duplicates[sentence]
-                doc.p "#{sentence} ", color: 'FF0000', bold: true
-              else
-                doc.p "#{sentence} ", color: '000000'
-              end
-            end
-          end
-        end
-      end
-
-      puts "Cleaned document with formatting saved to #{::File.expand_path output_filename}"
-    end
-
-    def self.clean_and_analyze_chapter(input_file, analysis_file, cleaned_file)
-      # Determine file type and extract text accordingly
-      full_text = if input_file.end_with?('.txt')
-                    File.read(input_file)
-                  elsif input_file.end_with?('.docx')
-                    doc = Docx::Document.open(input_file)
-                    doc.paragraphs.map(&:text).join("\n")
-                  else
-                    raise "Unsupported file type. Please provide a .txt or .docx file."
-                  end
-
-      # Split content into sentences using Pragmatic Segmenter
-      segmenter = PragmaticSegmenter::Segmenter.new(text: full_text)
-      sentences = segmenter.segment
-
-      # Identify duplicate sentences
-      sentence_count = Hash.new(0)
-      sentences.each { |sentence| sentence_count[sentence.strip] += 1 }
-      duplicates = sentence_count.select { |_sentence, count| count > 1 }.keys
-
-      # Generate analysis file with duplicates highlighted
-      puts 'Generating analysis document...'
-      Caracal::Document.save(analysis_file) do |doc|
-        sentences.each do |sentence|
-          if duplicates.include?(sentence.strip)
-            doc.p sentence.strip, color: 'FF0000', bold: true, font: 'Times New Roman', underline: false
-          else
-            doc.p sentence.strip, font: 'Times New Roman', underline: false
-          end
-        end
-      end
-      puts "Cleaned document with formatting saved to #{analysis_file}"
-
-      # Generate cleaned file with duplicates removed
-      puts 'Generating cleaned document...'
-      Caracal::Document.save(cleaned_file) do |doc|
-        seen_sentences = {}
-
-        sentences.each do |sentence|
-          clean_sentence = sentence.strip
-          unless seen_sentences.include?(clean_sentence)
-            doc.p clean_sentence, font: 'Times New Roman', underline: false
-            seen_sentences[clean_sentence] = true
-          end
-        end
-      end
-
-      puts "Cleaned document saved to #{cleaned_file}"
-    end
-
-    def self.remove_duplicates_from_docx(input_path)
-      output_path = input_path.sub(/\.docx$/, '_no_duplicates.docx')
-      duplicate_sentences = []  # Add this to track duplicates
-
-      # Copy the original file to the new location
-      FileUtils.cp(input_path, output_path)
-
-      Zip::File.open(output_path) do |zip_file|
-        # Read the main document content
-        doc_entry = zip_file.find_entry('word/document.xml')
-        doc_content = doc_entry.get_input_stream.read
-
-        # Parse the XML
-        doc = Nokogiri::XML(doc_content)
-
-        # Get all paragraphs
-        paragraphs = doc.xpath('//w:p')
-
-        # Process paragraphs to remove duplicates
-        seen_sentences = Set.new
-        paragraphs.each do |para|
-          # Extract text from paragraph while preserving formatting nodes
-          text_nodes = para.xpath('.//w:t')
-          full_text = text_nodes.map(&:text).join
-
-          # Split into sentences
-          sentences = full_text.split(/(?<=[.!?])\s+/)
-
-          # Filter out duplicate sentences
-          unique_sentences = sentences.reject do |sentence|
-            sentence = sentence.strip.downcase
-            next if sentence.empty?
-            if seen_sentences.include?(sentence)
-              duplicate_sentences << sentence  # Add this to track duplicates
-              true
-            else
-              seen_sentences.add(sentence)
-              false
-            end
-          end
-
-          # Skip empty paragraphs
-          next if unique_sentences.empty?
-
-          # Update the first text node with all unique content
-          if text_nodes.any?
-            text_nodes.first.content = unique_sentences.join(' ')
-            # Remove any additional text nodes
-            text_nodes[1..-1].each(&:remove)
-          end
-        end
-
-        # Write the modified content back to the zip file
-        zip_file.get_output_stream('word/document.xml') do |out|
-          out.write(doc.to_xml)
-        end
-      end
-
-      # Print duplicate sentences
-      puts "\nDuplicate sentences found:"
-      ap duplicate_sentences.uniq  # Use uniq to avoid showing the same duplicate multiple times
-
-      output_path
-    end
-
-    def self.extract_numbered_items(docx_path)
-      raise 'Input must be a .docx file' unless docx_path.end_with?('.docx')
-
-      document_xml = GPTK::Doc.extract_document_xml(docx_path)
-      doc = Nokogiri::XML(document_xml)
-
-      items = []
-
-      doc.xpath('//w:p').each do |paragraph|
-        # Look specifically for numPr nodes with numId="9"
-        num_pr = paragraph.at_xpath('.//w:numPr')
-        if num_pr && num_pr.at_xpath('.//w:numId[@w:val="9"]')
-          text = paragraph.xpath('.//w:t').map(&:text).join.strip
-          items << text unless text.empty?
-        end
-      end
-
-      items
-    end
-
-    private
-
-    def self.normalize_paragraph(paragraph)
-      paragraph.map { |part| part[:text].gsub(/\s+/, ' ').strip }.join(' ').downcase
     end
   end
 end

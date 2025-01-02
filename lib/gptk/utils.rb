@@ -67,15 +67,18 @@ module GPTK
     #   - The method uses recursion to find a non-conflicting filename.
     #   - If the filename contains a number, it increments that number.
     #   - If the filename does not contain a number, "1" is appended to the base name.
-    #   - Currently, this method does not handle cases where the directory is missing (marked as TODO).
     #
     # @see File.exist?
     # @see String#sub
     # @see Regexp#match
     #
-    # @todo Account for missing directory
     def self.fname_increment(filename)
-      if !::File.exist? filename
+      # Ensure the directory exists
+      dir = File.dirname filename
+      FileUtils.mkdir_p dir unless File.directory dir
+
+      # Increment the filename if it exists
+      if !File.exist? filename
         filename
       else
         /([0-9]+)\./.match(filename) ?

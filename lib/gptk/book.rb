@@ -1218,7 +1218,7 @@ module GPTK
       operations.update CONFIG[:bad_patterns]
 
       # Parse the filters in the trainers file into operations
-      trainers = GPTK::Text.parse_numbered_categories @training
+      trainers = GPTK::Text::Parse.numbered_categories @training
       operations.update trainers
 
       # Loop until the user is finished with revision process
