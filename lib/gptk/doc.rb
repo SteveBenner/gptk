@@ -147,7 +147,7 @@ module GPTK
     #   remove_duplicate_paragraphs
     #   # Outputs: "Cleaned document with formatting saved to <file path>"
     #
-    def remove_duplicate_paragraphs
+    def remove_duplicate_paragraphs_from_docx
       # Parse paragraphs from the file
       paragraphs = GPTK::Text::Parse.paragraphs_with_formatting_from_docx @file
 
@@ -176,7 +176,6 @@ module GPTK
       puts "Cleaned document with formatting saved to #{@file}"
     end
 
-
     # Cleans a chapter by removing duplicate sentences and paragraphs, and saves the result to a Word document.
     #
     # This method processes the content stored in the `@content` attribute of the `Doc` object. It normalizes
@@ -192,7 +191,7 @@ module GPTK
     #   doc.content = "This is a sentence.\n\nThis is a duplicate sentence.\n\nThis is a sentence."
     #   doc.clean_chapter
     #   # Outputs: "Cleaned document with formatting saved to <file path>"
-    def clean_chapter
+    def clean_doc_text
       # Ensure @content is set
       raise 'The @content attribute must be set before calling `clean_chapter`.' unless defined?(@content) && @content
 
@@ -273,7 +272,7 @@ module GPTK
     #   # "Analysis document saved to chapter-analysis.docx"
     #   # "Generating cleaned document..."
     #   # "Cleaned document saved to chapter-clean.docx"
-    def clean_and_analyze_chapter
+    def clean_and_analyze_doc
       # Determine file type and extract text accordingly
       full_text = if @file.end_with?('.txt')
                     File.read(input_file)
@@ -422,7 +421,7 @@ module GPTK
     #   # Output:
     #   # ["First numbered item", "Second numbered item", ...]
     #
-    def extract_numbered_items
+    def extract_numbered_items_from_docx
       raise 'Input must be a .docx file' unless @file.end_with? '.docx'
 
       document_xml = extract_document_xml
