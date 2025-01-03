@@ -75,7 +75,7 @@ module GPTK
     def self.fname_increment(filename)
       # Ensure the directory exists
       dir = File.dirname filename
-      FileUtils.mkdir_p dir unless File.directory dir
+      FileUtils.mkdir_p dir unless File.directory? dir
 
       # Increment the filename if it exists
       if !File.exist? filename

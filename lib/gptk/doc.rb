@@ -28,7 +28,7 @@ module GPTK
     #
     # @see OpenAI::Client
     def initialize(file_path, content = nil)
-      @file = GPTK::Utils.fname_increment File.expand_path file_path
+      @file = File.expand_path file_path
       @content = content
       @data = { # Data points to track while utilizing APIs
         prompt_tokens: 0,
@@ -129,8 +129,9 @@ module GPTK
         puts 'Perform an operation or assign a value to the Doc `content` variable.'
       end
       content = @content || @last_output
-      puts "Writing document content to file: #{@file}"
-      File.write @file, content
+      file_path = GPTK::Utils.fname_increment @file
+      puts "Writing document content to file: #{file_path}"
+      File.write file_path, content
     end
 
     # Removes duplicate paragraphs from a `.docx` file while preserving their formatting.
@@ -174,6 +175,86 @@ module GPTK
       end
 
       puts "Cleaned document with formatting saved to #{@file}"
+    end
+
+    # Removes duplicate sentences from a `.docx` file and saves the result to a new file.
+    #
+    # This method processes the main document content (`word/document.xml`) in a `.docx` file to remove duplicate
+    # sentences while preserving formatting and structure. It writes the deduplicated content to a new file and
+    # prints the duplicate sentences to the console.
+    #
+    # @return [void]
+    # @raise [Errno::ENOENT] If the specified file does not exist.
+    # @raise [Zip::Error] If the file is not a valid ZIP archive.
+    # @raise [Nokogiri::XML::SyntaxError] If the XML structure is malformed.
+    #
+    # @example Remove duplicates from a `.docx` file
+    #   doc.remove_duplicates_from_docx
+    #   # Outputs duplicate sentences to the console and creates a new file with duplicates removed.
+    #
+    # @todo: Make more generic so as to be able to handle .txt files as well
+    #
+    def remove_duplicate_sentences_from_docx
+      output_path = @file.sub(/\.docx$/, '_without_duplicates.docx')
+      duplicate_sentences = []  # Add this to track duplicates
+
+      # Copy the original file to the new location
+      FileUtils.cp(@file, output_path)
+
+      Zip::File.open(output_path) do |zip_file|
+        # Read the main document content
+        doc_entry = zip_file.find_entry('word/document.xml')
+        doc_content = doc_entry.get_input_stream.read
+
+        # Parse the XML
+        doc = Nokogiri::XML(doc_content)
+
+        # Get all paragraphs
+        paragraphs = doc.xpath('//w:p')
+
+        # Process paragraphs to remove duplicates
+        seen_sentences = Set.new
+        paragraphs.each do |para|
+          # Extract text from paragraph while preserving formatting nodes
+          text_nodes = para.xpath('.//w:t')
+          full_text = text_nodes.map(&:text).join
+
+          # Split into sentences
+          sentences = full_text.split(/(?<=[.!?])\s+/)
+
+          # Filter out duplicate sentences
+          unique_sentences = sentences.reject do |sentence|
+            sentence = sentence.strip.downcase
+            next if sentence.empty?
+            if seen_sentences.include?(sentence)
+              duplicate_sentences << sentence  # Add this to track duplicates
+              true
+            else
+              seen_sentences.add(sentence)
+              false
+            end
+          end
+
+          # Skip empty paragraphs
+          next if unique_sentences.empty?
+
+          # Update the first text node with all unique content
+          if text_nodes.any?
+            text_nodes.first.content = unique_sentences.join(' ')
+            # Remove any additional text nodes
+            text_nodes[1..-1].each(&:remove)
+          end
+        end
+
+        # Write the modified content back to the zip file
+        zip_file.get_output_stream('word/document.xml') do |out|
+          out.write(doc.to_xml)
+        end
+      end
+
+      # Print duplicate sentences
+      puts "\nDuplicate sentences removed:"
+      ap duplicate_sentences.uniq  # Use uniq to avoid showing the same duplicate multiple times
     end
 
     # Cleans a chapter by removing duplicate sentences and paragraphs, and saves the result to a Word document.
@@ -294,7 +375,7 @@ module GPTK
 
       # Generate analysis file with duplicates highlighted
       puts 'Generating analysis document...'
-      analysis_file = @file.gsub /(.*)(\.\w+)$/, '\1-analysis\2'
+      analysis_file = @file.gsub(/(.*)(\.\w+)$/, '\1-analysis\2')
       Caracal::Document.save analysis_file do |doc|
         sentences.each do |sentence|
           if duplicates.include?(sentence.strip)
@@ -308,7 +389,7 @@ module GPTK
 
       # Generate cleaned file with duplicates removed
       puts 'Generating cleaned document...'
-      cleaned_file = @file.gsub /(.*)(\.\w+)$/, '\1-clean\2'
+      cleaned_file = @file.gsub(/(.*)(\.\w+)$/, '\1-clean\2')
       Caracal::Document.save(cleaned_file) do |doc|
         seen_sentences = {}
 
@@ -322,86 +403,6 @@ module GPTK
       end
 
       puts "Cleaned document saved to #{cleaned_file}"
-    end
-
-    # Removes duplicate sentences from a `.docx` file and saves the result to a new file.
-    #
-    # This method processes the main document content (`word/document.xml`) in a `.docx` file to remove duplicate
-    # sentences while preserving formatting and structure. It writes the deduplicated content to a new file and
-    # prints the duplicate sentences to the console.
-    #
-    # @return [void]
-    # @raise [Errno::ENOENT] If the specified file does not exist.
-    # @raise [Zip::Error] If the file is not a valid ZIP archive.
-    # @raise [Nokogiri::XML::SyntaxError] If the XML structure is malformed.
-    #
-    # @example Remove duplicates from a `.docx` file
-    #   doc.remove_duplicates_from_docx
-    #   # Outputs duplicate sentences to the console and creates a new file with duplicates removed.
-    #
-    # @todo: Make more generic so as to be able to handle .txt files as well
-    #
-    def remove_duplicates_from_docx
-      output_path = @file.sub(/\.docx$/, '_without_duplicates.docx')
-      duplicate_sentences = []  # Add this to track duplicates
-
-      # Copy the original file to the new location
-      FileUtils.cp(@file, output_path)
-
-      Zip::File.open(output_path) do |zip_file|
-        # Read the main document content
-        doc_entry = zip_file.find_entry('word/document.xml')
-        doc_content = doc_entry.get_input_stream.read
-
-        # Parse the XML
-        doc = Nokogiri::XML(doc_content)
-
-        # Get all paragraphs
-        paragraphs = doc.xpath('//w:p')
-
-        # Process paragraphs to remove duplicates
-        seen_sentences = Set.new
-        paragraphs.each do |para|
-          # Extract text from paragraph while preserving formatting nodes
-          text_nodes = para.xpath('.//w:t')
-          full_text = text_nodes.map(&:text).join
-
-          # Split into sentences
-          sentences = full_text.split(/(?<=[.!?])\s+/)
-
-          # Filter out duplicate sentences
-          unique_sentences = sentences.reject do |sentence|
-            sentence = sentence.strip.downcase
-            next if sentence.empty?
-            if seen_sentences.include?(sentence)
-              duplicate_sentences << sentence  # Add this to track duplicates
-              true
-            else
-              seen_sentences.add(sentence)
-              false
-            end
-          end
-
-          # Skip empty paragraphs
-          next if unique_sentences.empty?
-
-          # Update the first text node with all unique content
-          if text_nodes.any?
-            text_nodes.first.content = unique_sentences.join(' ')
-            # Remove any additional text nodes
-            text_nodes[1..-1].each(&:remove)
-          end
-        end
-
-        # Write the modified content back to the zip file
-        zip_file.get_output_stream('word/document.xml') do |out|
-          out.write(doc.to_xml)
-        end
-      end
-
-      # Print duplicate sentences
-      puts "\nDuplicate sentences removed:"
-      ap duplicate_sentences.uniq  # Use uniq to avoid showing the same duplicate multiple times
     end
 
     # Extracts numbered items from a `.docx` file, specifically those with a `numId` of 9.

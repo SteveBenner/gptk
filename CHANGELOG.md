@@ -2,7 +2,12 @@
 
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
-## 0.17
+## 0.19
+
+## 0.18 - 2025.01.03
+- Added `AI::ChatGPT::run_batch` and `AI::ChatGPT::generate_batch` to re-enable use of batch mode.
+
+## 0.17 - 2025.01.01
 - Added `Text::remove_duplicates_from_docx` which modifies a `docx` file in place to remove duplicate sentences.
 - Added missing documentation for `Text` and `Doc` module methods.
 - Somehow fixed an issue with `Zip` namespace clashing.
