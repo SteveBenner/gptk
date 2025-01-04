@@ -3,6 +3,17 @@ module GPTK
     attr_reader :last_output, :data
     attr_accessor :file, :content
 
+    COLOR_HEXCODES = {
+      1 => 'F5F5DC', # beige
+      2 => '800080', # purple
+      3 => 'FF0000', # red
+      4 => '0000FF', # blue
+      5 => 'FFA500', # orange
+      6 => '008000', # green
+      7 => 'FFFF00', # yellow
+      8 => '40E0D0'  # turquoise
+    }
+
     # Initializes a new instance of the `Doc` class.
     #
     # This constructor sets up the `Doc` object with the provided API client, output file,
@@ -353,6 +364,7 @@ module GPTK
     #   # "Analysis document saved to chapter-analysis.docx"
     #   # "Generating cleaned document..."
     #   # "Cleaned document saved to chapter-clean.docx"
+    #
     def clean_and_analyze_doc
       # Determine file type and extract text accordingly
       full_text = if @file.end_with?('.txt')
@@ -442,30 +454,144 @@ module GPTK
       items
     end
 
-    private
+    def categorize_and_colorize_items_from_docx(categories_hash, colors_hash)
+      raise 'Input must be a .docx file' unless @file.end_with?('.docx')
 
-    # Extracts the `document.xml` content from the `.docx` file specified by the `@file` instance variable.
+      # Clone the docx so we don't overwrite your original
+      output_path = @file.sub(/\.docx$/, '_categorized_and_colorized.docx')
+      FileUtils.cp(@file, output_path)
+
+      Zip::File.open(output_path) do |zip_file|
+        doc_entry = zip_file.find_entry('word/document.xml')
+        raise 'document.xml not found in .docx file' unless doc_entry
+
+        doc_content = doc_entry.get_input_stream.read
+        doc = Nokogiri::XML(doc_content)
+
+        # We look for paragraphs in the body
+        paragraphs = doc.xpath('//w:body/w:p')
+
+        previous_category_id = nil
+
+        paragraphs.each do |para|
+          # Check if this paragraph is enumerated (numId=9)
+          num_id_node = para.at_xpath('.//w:numPr/w:numId[@w:val="9"]')
+          next unless num_id_node  # skip if not enumerated
+
+          # Extract text
+          text = para.xpath('.//w:t').map(&:text).join.strip
+          next if text.empty?
+
+          # 1. Look up the category number for this exact text
+          cat_id = categories_hash[text]
+          next unless cat_id  # skip if we don't have a category for it
+
+          # 2. Determine the color category. If not found, fallback to cat_id
+          color_cat_id = colors_hash[text] || cat_id
+
+          # 3. If the category changed since the last item, insert a heading paragraph
+          if cat_id != previous_category_id
+            heading_p = create_heading_paragraph(doc, "Category #{cat_id}")
+            # Insert heading *before* the enumerated paragraph
+            para.add_previous_sibling(heading_p)
+            previous_category_id = cat_id
+          end
+
+          # 4. Colorize this paragraph's runs in place
+          hex_color = COLOR_HEXCODES[color_cat_id] || '000000'
+          colorize_paragraph_runs(para, hex_color)
+        end
+
+        # Write changes back
+        zip_file.get_output_stream('word/document.xml') do |out|
+          out.write(doc.to_xml)
+        end
+      end
+
+      puts "Categorization + colorizing + numbering preserved => #{output_path}"
+    end
+
+    ##
+    # Creates a heading paragraph with the given text.
+    # By default, applies "Heading1" style. Adjust if needed.
     #
-    # This method opens the `.docx` file (treated as a ZIP archive), locates the `word/document.xml` file,
-    # and extracts its raw XML content. It raises an error if the required file is not found in the archive.
+    # @param doc [Nokogiri::XML::Document]
+    # @param heading_text [String]
+    # @return [Nokogiri::XML::Node]
     #
-    # @return [String] The raw XML content of `word/document.xml`.
-    # @raise [RuntimeError] If the `document.xml` file is not found in the `.docx` archive.
-    # @raise [Zip::Error] If the file is not a valid ZIP archive.
-    # @raise [Errno::ENOENT] If the specified file does not exist.
+    def create_heading_paragraph(doc, heading_text)
+      p_node = Nokogiri::XML::Node.new('w:p', doc)
+
+      # <w:pPr> with a <w:pStyle w:val="Heading1"/>
+      p_pr = Nokogiri::XML::Node.new('w:pPr', doc)
+      p_style = Nokogiri::XML::Node.new('w:pStyle', doc)
+      p_style['w:val'] = 'Heading1'
+      p_pr << p_style
+      p_node << p_pr
+
+      # <w:r><w:t> for the heading text
+      r_node = Nokogiri::XML::Node.new('w:r', doc)
+      t_node = Nokogiri::XML::Node.new('w:t', doc)
+      t_node.content = heading_text
+      r_node << t_node
+      p_node << r_node
+
+      p_node
+    end
+
+    ##
+    # Colorizes all <w:r> (runs) in the given paragraph, by setting <w:color w:val="hex_color" />
     #
-    # @example Extract the document XML from the instance's `.docx` file
-    #   doc = Doc.new("example.docx")
-    #   xml_content = doc.extract_document_xml
-    #   puts xml_content
-    #   # Outputs the raw XML content of the document
+    # @param paragraph_node [Nokogiri::XML::Node]
+    # @param hex_color [String] (e.g. "FF0000" for red)
+    # @return [void]
     #
-    def extract_document_xml
+    def colorize_paragraph_runs(paragraph_node, hex_color)
+      paragraph_node.xpath('.//w:r').each do |run|
+        # Either find or create <w:rPr>
+        r_pr = run.at_xpath('./w:rPr')
+        unless r_pr
+          r_pr = Nokogiri::XML::Node.new('w:rPr', paragraph_node.document)
+          run.children.first.add_previous_sibling(r_pr) if run.children.any?
+        end
+
+        # Either find or create <w:color>
+        color_node = r_pr.at_xpath('./w:color')
+        unless color_node
+          color_node = Nokogiri::XML::Node.new('w:color', paragraph_node.document)
+          r_pr << color_node
+        end
+
+        color_node['w:val'] = hex_color
+      end
+    end
+
+    # Extracts the `document.xml` content from the specified `.docx` file.
+    #
+    # This method locates and reads the primary WordprocessingML document file
+    # (`word/document.xml`) within a `.docx` archive.
+    #
+    # @return [String]
+    #   The raw XML string from the `word/document.xml` entry.
+    #
+    # @raise [RuntimeError]
+    #   If `document.xml` does not exist within the `.docx` file.
+    #
+    # @example Retrieve the main document XML:
+    #   doc_xml = extract_document_xml
+    #   puts doc_xml  # => Prints the raw XML content of word/document.xml
+    #
+    # @note
+    #   This method expects `@file` to be the path to an existing `.docx` file.
+    #
+    def self.extract_document_xml
+      output = ''
       Zip::File.open @file do |zip_file|
         entry = zip_file.find_entry('word/document.xml')
         raise 'document.xml not found in .docx file' unless entry
-        return entry.get_input_stream.read
+        output = entry.get_input_stream.read
       end
+      output
     end
   end
 end

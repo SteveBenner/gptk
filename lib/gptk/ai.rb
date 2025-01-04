@@ -823,20 +823,42 @@ module GPTK
       abort 'Error: no categories found!' if categories.empty?
       puts "Categorizing #{items.count} items..."
 
-      # Compose the list of prompts for our batch query
+      # Compose the list of prompts, one per item
       prompts = items.map do |item|
-        "Based on the following categories:\n\n#{categories}\n\nPlease categorize the following item:\n\n#{item}\n\nPlease return JUST the category number, and no other output text."
+        <<~PROMPT
+          Based on the following categories:
+    
+          #{categories}
+    
+          Please categorize the following item:
+    
+          #{item}
+    
+          Please return JUST the category NUMBER (excluding zero), and no other text.
+        PROMPT
       end
 
-      responses = ChatGPT.run_batch client, prompts
-      ap responses
+      # Run the batch and get responses (one response per item/prompt)
+      responses = ChatGPT.run_batch(client, prompts)
 
-      results = responses.group_by { |content| content.to_i }
-      puts 'Error: no output!' unless results && !results.empty?
-      result_count = results.values.reduce(0) {|j, loe| j += loe.count; j }
-      puts "Successfully categorized #{result_count} items in #{results.keys.count} categories!"
-      @last_output = results # Cache results of the complete operation
-      results
+      # Build a hash: { "item_text" => category_number }
+      item_category_map = {}
+      responses.each_with_index do |resp, index|
+        category_num = resp.to_i
+        item_category_map[items[index]] = category_num
+      end
+
+      # Some basic checks
+      if item_category_map.empty?
+        puts 'Error: no output!'
+      else
+        puts "Successfully categorized #{item_category_map.size} items!"
+      end
+
+      # Cache the results for later use, if needed
+      @last_output = item_category_map
+
+      item_category_map
     end
   end
 end

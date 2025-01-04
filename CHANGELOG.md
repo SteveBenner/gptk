@@ -3,6 +3,7 @@
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
 ## 0.19
+- Added `Doc#categorize_and_colorize_docx` which modifies a docx in place to categorize and colorize enumerated items within, based on given category data.
 
 ## 0.18 - 2025.01.03
 - Added `AI::ChatGPT::run_batch` and `AI::ChatGPT::generate_batch` to re-enable use of batch mode.
