@@ -834,7 +834,7 @@ module GPTK
     
           #{item}
     
-          Please return JUST the category NUMBER (excluding zero), and no other text.
+          Please return JUST the category NUMBER (excluding zero), and no other text. Ensure that every item receives a valid non-zero category number.
         PROMPT
       end
 

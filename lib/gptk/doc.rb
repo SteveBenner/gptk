@@ -3,6 +3,7 @@ module GPTK
     attr_reader :last_output, :data
     attr_accessor :file, :content
 
+    MS_WORD_NAMESPACE = { 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main' }
     COLOR_HEXCODES = {
       1 => 'F5F5DC', # beige
       2 => '800080', # purple
@@ -13,6 +14,20 @@ module GPTK
       7 => 'FFFF00', # yellow
       8 => '40E0D0'  # turquoise
     }
+    CATEGORY_NAMES = {
+      1  => 'Consciousness & Self-Awareness',
+      2  => 'Mindfulness & Presence',
+      3  => 'Philosophical Inquiry & Existential Reflection',
+      4  => 'Spiritual & Transcendent Exploration',
+      5  => 'Emotional Well-being & Resilience',
+      6  => 'Interpersonal Dynamics & Relationships',
+      7  => 'Intellectual Curiosity & Growth',
+      8  => 'Nature, Universality, & the Cosmos',
+      9  => 'Philosophical & Moral Paradoxes',
+      10 => 'Creative Expression & the Art of Life',
+      11 => 'Mysticism, Magic, & Symbolism',
+      12 => 'Practical Wisdom & Daily Reflections'
+    }
 
     # Initializes a new instance of the `Doc` class.
     #
@@ -20,7 +35,6 @@ module GPTK
     # and content. It validates the API client and initializes tracking data for
     # API usage metrics, including prompt tokens, completion tokens, and cached tokens.
     #
-    # @param api_client [Object] The client instance used for interacting with an API. This parameter is mandatory.
     # @param file_path [String, nil] The name of the output file to save generated content.
     # @param content [String, nil] The content to be processed or utilized by the `Doc` instance. Optional.
     #
@@ -32,12 +46,8 @@ module GPTK
     #   doc = Doc.new(file_path, content)
     #
     # @note
-    #   - The method aborts execution if the `api_client` is not provided or invalid.
     #   - The `@data` hash is initialized to track token usage metrics during API interactions.
     #
-    # @raise [Abort] If the `api_client` is not provided or invalid.
-    #
-    # @see OpenAI::Client
     def initialize(file_path, content = nil)
       @file = File.expand_path file_path
       @content = content
@@ -457,9 +467,9 @@ module GPTK
     def categorize_and_colorize_items_from_docx(categories_hash, colors_hash)
       raise 'Input must be a .docx file' unless @file.end_with?('.docx')
 
-      # Clone the docx so we don't overwrite your original
       output_path = @file.sub(/\.docx$/, '_categorized_and_colorized.docx')
       FileUtils.cp(@file, output_path)
+      puts "Copied original file to #{output_path} for processing."
 
       Zip::File.open(output_path) do |zip_file|
         doc_entry = zip_file.find_entry('word/document.xml')
@@ -468,38 +478,100 @@ module GPTK
         doc_content = doc_entry.get_input_stream.read
         doc = Nokogiri::XML(doc_content)
 
-        # We look for paragraphs in the body
-        paragraphs = doc.xpath('//w:body/w:p')
+        # Locate <w:document> & <w:body>
+        w_doc_node = doc.at_xpath('//w:document', MS_WORD_NAMESPACE)
+        body_node = w_doc_node&.at_xpath('./w:body', MS_WORD_NAMESPACE)
+        unless body_node
+          puts "No <w:body> element found! Exiting."
+          return
+        end
 
-        previous_category_id = nil
+        paragraphs = body_node.xpath('.//w:p', MS_WORD_NAMESPACE)
+        puts "Found #{paragraphs.size} paragraphs in <w:body>."
 
-        paragraphs.each do |para|
-          # Check if this paragraph is enumerated (numId=9)
-          num_id_node = para.at_xpath('.//w:numPr/w:numId[@w:val="9"]')
-          next unless num_id_node  # skip if not enumerated
+        enumerated_paras = []
 
-          # Extract text
-          text = para.xpath('.//w:t').map(&:text).join.strip
-          next if text.empty?
+        # Step 1: Collect all numbered paragraphs
+        paragraphs.each_with_index do |para, i|
+          num_pr_node = para.at_xpath('.//w:numPr', MS_WORD_NAMESPACE)
+          if num_pr_node
+            ilvl_node = num_pr_node.at_xpath('.//w:ilvl', MS_WORD_NAMESPACE)
+            num_id_node = num_pr_node.at_xpath('.//w:numId', MS_WORD_NAMESPACE)
 
-          # 1. Look up the category number for this exact text
-          cat_id = categories_hash[text]
-          next unless cat_id  # skip if we don't have a category for it
+            if ilvl_node && num_id_node
+              text_content = para.xpath('.//w:t', MS_WORD_NAMESPACE).map(&:text).join(' ').strip
+              enumerated_paras << {
+                paragraph: para,
+                text: text_content,
+                index: i,
+                ilvl: ilvl_node['w:val'],
+                num_id: num_id_node['w:val']
+              }
+            end
+          end
+        end
 
-          # 2. Determine the color category. If not found, fallback to cat_id
-          color_cat_id = colors_hash[text] || cat_id
+        if enumerated_paras.empty?
+          puts "No enumerated paragraphs matched your criteria! Output will be unchanged."
+          return
+        end
 
-          # 3. If the category changed since the last item, insert a heading paragraph
-          if cat_id != previous_category_id
-            heading_p = create_heading_paragraph(doc, "Category #{cat_id}")
-            # Insert heading *before* the enumerated paragraph
-            para.add_previous_sibling(heading_p)
-            previous_category_id = cat_id
+        # Step 2: Group by category or assign to "Uncategorized"
+        grouped = Hash.new { |hash, key| hash[key] = [] }
+        uncategorized_key = 'Uncategorized'
+
+        enumerated_paras.each do |item|
+          # Normalize text content for matching
+          normalized_text = item[:text].strip.downcase
+          cat_id = categories_hash[normalized_text] rescue nil
+          category = cat_id ? CATEGORY_NAMES[cat_id] : uncategorized_key
+          grouped[category] << item
+        end
+
+        # Step 3: Insert categories and apply formatting
+        grouped.each do |category, items|
+          puts "Processing category: #{category} with #{items.size} items."
+
+          # Check if categories_hash is valid
+          unless categories_hash.is_a?(Hash)
+            raise ArgumentError, "categories_hash must be a valid Hash, but got #{categories_hash.inspect}"
           end
 
-          # 4. Colorize this paragraph's runs in place
-          hex_color = COLOR_HEXCODES[color_cat_id] || '000000'
-          colorize_paragraph_runs(para, hex_color)
+          # Insert category heading
+          first_item = items.first
+          heading_para = create_heading_paragraph(doc, category)
+          first_item[:paragraph].add_previous_sibling(heading_para)
+
+          items.each do |item|
+            paragraph_node = item[:paragraph]
+
+            # Normalize text for matching
+            normalized_text = item[:text].to_s.strip.downcase # Convert to string, trim, and downcase
+            cat_id = categories_hash[normalized_text]
+
+            # Handle unmatched items
+            if cat_id.nil?
+              puts "Unmatched item text: '#{item[:text]}'"
+              cat_id = "Uncategorized" # Assign to Uncategorized if no match found
+            end
+
+            # Apply text-only colorization
+            runs = paragraph_node.xpath('.//w:r', MS_WORD_NAMESPACE)
+            runs.each do |run|
+              t_node = run.at_xpath('.//w:t', MS_WORD_NAMESPACE)
+              next unless t_node
+
+              # Ensure <w:rPr> exists for this run
+              r_pr = run.at_xpath('./w:rPr', MS_WORD_NAMESPACE) || Nokogiri::XML::Node.new('w:rPr', doc)
+              run.add_child(r_pr) unless run.at_xpath('./w:rPr', MS_WORD_NAMESPACE)
+
+              # Apply color to the text node only
+              hex_color = COLOR_HEXCODES[cat_id] || '000000'
+              color_node = r_pr.at_xpath('./w:color', MS_WORD_NAMESPACE) || Nokogiri::XML::Node.new('w:color', doc)
+              color_node['w:val'] = hex_color
+              r_pr.add_child(color_node) unless r_pr.at_xpath('./w:color', MS_WORD_NAMESPACE)
+            end
+          end
         end
 
         # Write changes back
@@ -508,62 +580,56 @@ module GPTK
         end
       end
 
-      puts "Categorization + colorizing + numbering preserved => #{output_path}"
+      puts "Categorization and colorizing completed => #{output_path}"
     end
 
-    ##
-    # Creates a heading paragraph with the given text.
-    # By default, applies "Heading1" style. Adjust if needed.
-    #
-    # @param doc [Nokogiri::XML::Document]
-    # @param heading_text [String]
-    # @return [Nokogiri::XML::Node]
-    #
-    def create_heading_paragraph(doc, heading_text)
+    def create_heading_paragraph(doc, heading_text, heading_style = 'Heading1')
+      # Create the <w:p> (paragraph) node
       p_node = Nokogiri::XML::Node.new('w:p', doc)
 
-      # <w:pPr> with a <w:pStyle w:val="Heading1"/>
+      # Create <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
       p_pr = Nokogiri::XML::Node.new('w:pPr', doc)
       p_style = Nokogiri::XML::Node.new('w:pStyle', doc)
-      p_style['w:val'] = 'Heading1'
-      p_pr << p_style
-      p_node << p_pr
+      p_style['w:val'] = heading_style
+      p_pr.add_child(p_style)
+      p_node.add_child(p_pr)
 
-      # <w:r><w:t> for the heading text
+      # Create <w:r><w:t>heading_text</w:t></w:r>
       r_node = Nokogiri::XML::Node.new('w:r', doc)
       t_node = Nokogiri::XML::Node.new('w:t', doc)
       t_node.content = heading_text
-      r_node << t_node
-      p_node << r_node
+      r_node.add_child(t_node)
+      p_node.add_child(r_node)
 
       p_node
     end
 
-    ##
-    # Colorizes all <w:r> (runs) in the given paragraph, by setting <w:color w:val="hex_color" />
-    #
-    # @param paragraph_node [Nokogiri::XML::Node]
-    # @param hex_color [String] (e.g. "FF0000" for red)
-    # @return [void]
-    #
-    def colorize_paragraph_runs(paragraph_node, hex_color)
-      paragraph_node.xpath('.//w:r').each do |run|
-        # Either find or create <w:rPr>
-        r_pr = run.at_xpath('./w:rPr')
-        unless r_pr
-          r_pr = Nokogiri::XML::Node.new('w:rPr', paragraph_node.document)
-          run.children.first.add_previous_sibling(r_pr) if run.children.any?
-        end
+    # Helper to extract numbering formats
+    def extract_numbering_formats(numbering)
+      formats = {}
+      numbering.xpath('//w:num', MS_WORD_NAMESPACE).each do |num_node|
+        num_id = num_node.at_xpath('./w:abstractNumId', MS_WORD_NAMESPACE)&.[]('w:val')
+        abstract_num = numbering.at_xpath("//w:abstractNum[@w:abstractNumId='#{num_id}']", MS_WORD_NAMESPACE)
+        next unless abstract_num
 
-        # Either find or create <w:color>
-        color_node = r_pr.at_xpath('./w:color')
-        unless color_node
-          color_node = Nokogiri::XML::Node.new('w:color', paragraph_node.document)
-          r_pr << color_node
+        abstract_num.xpath('.//w:lvl', MS_WORD_NAMESPACE).each do |lvl|
+          ilvl = lvl.at_xpath('.//w:ilvl', MS_WORD_NAMESPACE)&.[]('w:val')
+          num_fmt = lvl.at_xpath('.//w:numFmt', MS_WORD_NAMESPACE)&.[]('w:val')
+          lvl_text = lvl.at_xpath('.//w:lvlText', MS_WORD_NAMESPACE)&.[]('w:val')
+          formats[num_id] ||= {}
+          formats[num_id][ilvl] = lvl_text
         end
-
-        color_node['w:val'] = hex_color
       end
+      formats
+    end
+
+    # Helper to apply color to a run
+    def colorize_run(run_node, hex_color)
+      r_pr = run_node.at_xpath('./w:rPr', MS_WORD_NAMESPACE) || Nokogiri::XML::Node.new('w:rPr', run_node.document)
+      color_node = r_pr.at_xpath('./w:color', MS_WORD_NAMESPACE) || Nokogiri::XML::Node.new('w:color', run_node.document)
+      color_node['w:val'] = hex_color
+      r_pr.add_child(color_node)
+      run_node.add_child(r_pr)
     end
 
     # Extracts the `document.xml` content from the specified `.docx` file.
@@ -584,7 +650,7 @@ module GPTK
     # @note
     #   This method expects `@file` to be the path to an existing `.docx` file.
     #
-    def self.extract_document_xml
+    def extract_document_xml
       output = ''
       Zip::File.open @file do |zip_file|
         entry = zip_file.find_entry('word/document.xml')
