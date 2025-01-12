@@ -17,6 +17,7 @@ module GPTK
   VERSION = '0.19'.freeze
 
   # Load configuration files
+  Config.load_main_setup
   Config.load_openai_setup
   Config.load_book_setup
   puts 'Successfully configured GPTKit.'

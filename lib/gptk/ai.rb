@@ -322,6 +322,68 @@ module GPTK
         response_objects.collect {|obj| obj.dig('response', 'body', 'choices').first['message']['content'] }
       end
 
+      def self.query_to_rails_code(prompt, client)
+        erb_file_path = GPTK::CONFIG[:rails][:erb_file_path]
+        sass_file_path = GPTK::CONFIG[:rails][:sass_file_path]
+        coffee_file_path = GPTK::CONFIG[:rails][:coffeescript_file_path]
+
+        # Load prior states
+        erb_prior_state = File.exist?(erb_file_path) ? File.read(erb_file_path) : ""
+        sass_prior_state = File.exist?(sass_file_path) ? File.read(sass_file_path) : ""
+        coffee_prior_state = File.exist?(coffee_file_path) ? File.read(coffee_file_path) : ""
+
+        # Query for ERB file
+        erb_prompt = <<~PROMPT
+          Using the following prompt:
+          #{prompt}
+    
+          Generate a Rails ERB layout file.
+          Here is the prior state of the file for your reference:
+          #{erb_prior_state}
+    
+          IMPORTANT: ONLY output ERB code, no other output or conversation!
+          NOTE: PLEASE remove/strip any backticks and code block indicators from the output. JUST return the code, without markdown formatting delineation!
+        PROMPT
+
+        puts 'Updating ERB code...'
+        erb_result = query(client, nil, erb_prompt)
+        File.write(erb_file_path, erb_result)
+
+        # Query for SASS file
+        sass_prompt = <<~PROMPT
+          Using the following prompt:
+          #{prompt}
+    
+          Generate a Rails SASS file.
+          Here is the prior state of the file for your reference:
+          #{sass_prior_state}
+    
+          IMPORTANT: ONLY output Sass code, no other output or conversation!
+          NOTE: PLEASE remove/strip any backticks and code block indicators from the output. JUST return the code, without markdown formatting delineation!
+        PROMPT
+
+        puts 'Updating Sass code...'
+        sass_result = query(client, nil, sass_prompt)
+        File.write(sass_file_path, sass_result)
+
+        # Query for Coffeescript file
+        coffee_prompt = <<~PROMPT
+          Using the following prompt:
+          #{prompt}
+    
+          Generate a Rails Coffeescript file.
+          Here is the prior state of the file for your reference:
+          #{coffee_prior_state}
+    
+          IMPORTANT: ONLY output Coffeescript code, no other output or conversation!
+          NOTE: PLEASE remove/strip any backticks and code block indicators from the output. JUST return the code, without markdown formatting delineation!
+        PROMPT
+
+        puts 'Updating Coffeescript code...'
+        coffee_result = query(client, nil, coffee_prompt)
+        File.write(coffee_file_path, coffee_result)
+      end
+
       private
 
       def self.generate_batch_file(prompts)

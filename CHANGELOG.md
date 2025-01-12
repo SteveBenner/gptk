@@ -3,7 +3,8 @@
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
 ## 0.19
-- Added `Doc#categorize_and_colorize_docx` which modifies a docx in place to categorize and colorize enumerated items within, based on given category data.
+- Added `Doc#categorize_and_colorize_docx` which modifies a docx in place to categorize and colorize enumerated items within, based on given category data. Still a work in progress.
+- Added `AI::ChatGPT::query_to_rails_code` which runs an interactive session with the user in which they pass it an input, it analyzes the current state of your .erb, .sass, and .coffee files (set in `GPTK::CONFIG`) and rewrites them, saving the output back to the original file location, thus automating the process of updating your code!
 
 ## 0.18 - 2025.01.03
 - Added `AI::ChatGPT::run_batch` and `AI::ChatGPT::generate_batch` to re-enable use of batch mode.
