@@ -100,9 +100,9 @@ module GPTK
           description: description,
           instructions: instructions
         }
-        parameters.update({tools: tools}) if tools
-        parameters.update({tool_resources: tool_resources}) if tool_resources
-        parameters.update({metadata: metadata}) if metadata
+        parameters.update( tools: tools ) if tools
+        parameters.update( tool_resources: tool_resources ) if tool_resources
+        parameters.update( metadata: metadata ) if metadata
         response = client.assistants.create parameters: parameters
         @last_output = response
         response['id']
@@ -153,24 +153,25 @@ module GPTK
       # @see OpenAI::Client#runs.create
       # @see OpenAI::Client#runs.retrieve
       # @see OpenAI::Client#messages.list
-      # TODO: recode this to be self contained
-      def self.run_assistant_thread(client, prompts)
+      def self.run_assistant_thread(client, prompts, assistant_id: nil)
         raise 'Error: no prompts given!' if prompts.empty?
 
         # Create the Assistant if it does not exist already
-        assistant_id = if client.assistants.list['data'].empty?
-                         response = client.assistants.create(
-                           parameters: {
-                             model: GPTK::AI::CONFIG[:openai_gpt_model],
-                             name: 'AI Book generator',
-                             description: 'AI Book generator',
-                             instructions: @instructions
-                           }
-                         )
-                         response['id']
-                       else
-                         client.assistants.list['data'].first['id']
-                       end
+        unless assistant_id
+          assistant_id = if client.assistants.list['data'].empty?
+                           response = client.assistants.create(
+                             parameters: {
+                               model: GPTK::AI::CONFIG[:openai_gpt_model],
+                               name: 'AI Book generator',
+                               description: 'AI Book generator',
+                               instructions: @instructions
+                             }
+                           )
+                           response['id']
+                         else
+                           client.assistants.list['data'].first['id']
+                         end
+        end
 
         # Create the Thread
         response = client.threads.create
@@ -322,66 +323,30 @@ module GPTK
         response_objects.collect {|obj| obj.dig('response', 'body', 'choices').first['message']['content'] }
       end
 
-      def self.query_to_rails_code(prompt, client)
-        erb_file_path = GPTK::CONFIG[:rails][:erb_file_path]
-        sass_file_path = GPTK::CONFIG[:rails][:sass_file_path]
-        coffee_file_path = GPTK::CONFIG[:rails][:coffeescript_file_path]
+      def self.initialize_assistant(client)
+        response = client.assistants.list
+        return response['data'].first['id'] unless response['data'].empty?
 
-        # Load prior states
-        erb_prior_state = File.exist?(erb_file_path) ? File.read(erb_file_path) : ""
-        sass_prior_state = File.exist?(sass_file_path) ? File.read(sass_file_path) : ""
-        coffee_prior_state = File.exist?(coffee_file_path) ? File.read(coffee_file_path) : ""
+        creation_response = client.assistants.create(parameters: {
+          model: GPTK::AI::CONFIG[:openai_gpt_model],
+          name: 'Rails Code Generator',
+          description: 'An assistant for generating and refining Rails web code.',
+          instructions: 'Generate Rails ERB, SASS, and CoffeeScript files based on user input or provided file content.'
+        })
+        creation_response['id']
+      end
 
-        # Query for ERB file
-        erb_prompt = <<~PROMPT
-          Using the following prompt:
-          #{prompt}
-    
-          Generate a Rails ERB layout file.
-          Here is the prior state of the file for your reference:
-          #{erb_prior_state}
-    
-          IMPORTANT: ONLY output ERB code, no other output or conversation!
-          NOTE: PLEASE remove/strip any backticks and code block indicators from the output. JUST return the code, without markdown formatting delineation!
-        PROMPT
+      def self.send_prompt_to_thread(client, thread_id, prompt)
+        client.messages.create(thread_id: thread_id, parameters: { role: 'user', content: prompt })
 
-        puts 'Updating ERB code...'
-        erb_result = query(client, nil, erb_prompt)
-        File.write(erb_file_path, erb_result)
+        # Poll for the assistant's response
+        loop do
+          response = client.messages.list(thread_id: thread_id, parameters: { limit: 1, order: 'desc' })
+          latest_message = response['data'].first
+          return latest_message['content'] if latest_message && latest_message['role'] == 'assistant'
 
-        # Query for SASS file
-        sass_prompt = <<~PROMPT
-          Using the following prompt:
-          #{prompt}
-    
-          Generate a Rails SASS file.
-          Here is the prior state of the file for your reference:
-          #{sass_prior_state}
-    
-          IMPORTANT: ONLY output Sass code, no other output or conversation!
-          NOTE: PLEASE remove/strip any backticks and code block indicators from the output. JUST return the code, without markdown formatting delineation!
-        PROMPT
-
-        puts 'Updating Sass code...'
-        sass_result = query(client, nil, sass_prompt)
-        File.write(sass_file_path, sass_result)
-
-        # Query for Coffeescript file
-        coffee_prompt = <<~PROMPT
-          Using the following prompt:
-          #{prompt}
-    
-          Generate a Rails Coffeescript file.
-          Here is the prior state of the file for your reference:
-          #{coffee_prior_state}
-    
-          IMPORTANT: ONLY output Coffeescript code, no other output or conversation!
-          NOTE: PLEASE remove/strip any backticks and code block indicators from the output. JUST return the code, without markdown formatting delineation!
-        PROMPT
-
-        puts 'Updating Coffeescript code...'
-        coffee_result = query(client, nil, coffee_prompt)
-        File.write(coffee_file_path, coffee_result)
+          sleep 1
+        end
       end
 
       private
@@ -684,6 +649,8 @@ module GPTK
 
       # Sends a cached query to the Gemini API and retrieves the AI's response.
       #
+      # TODO: RE-DOCUMENT THIS
+      #
       # This method constructs an HTTP request to the Gemini API using the provided API key, body, and model.
       # It processes the response to extract the AI's output text. The method includes retry logic to handle
       # errors, such as JSON parsing failures or bad responses, and is designed for use with cached requests.
@@ -771,6 +738,8 @@ module GPTK
           @last_output = output
         end
       end
+
+
     end
 
     def self.last_output
