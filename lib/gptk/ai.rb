@@ -739,7 +739,129 @@ module GPTK
         end
       end
 
+      def self.query_to_rails_code(api_key, content_file:, prompt: nil)
+        require 'base64'
+        require 'json'
+        require 'httparty'
 
+        # Read the file content
+        file_content = File.read(content_file)
+
+        # Add padding if necessary
+        min_size = GPTK::AI::CONFIG[:gemini_min_cache_tokens] * 5
+        padding_needed = min_size - file_content.size
+        if padding_needed > 0
+          padding = 'F' * padding_needed
+          file_content = "#{padding}\n\n#{file_content}"
+        end
+
+        # Output the padded file content size and a snippet
+        puts "File content size after padding: #{file_content.size}"
+        puts "File content snippet: #{file_content[0..499]}"
+
+        # Base64 encode the padded content
+        base64_content = Base64.strict_encode64(file_content)
+
+        # Output the base64 content size and a snippet
+        puts "Base64 content size: #{base64_content.size}"
+        puts "Base64 content snippet: #{base64_content[0..499]}"
+
+        # Construct the request payload
+        request_payload = {
+          model: 'models/gemini-1.5-flash-001',
+          contents: [{
+                       role: 'user',
+                       parts: [{ inline_data: { mime_type: 'text/plain', data: base64_content } }]
+                     }],
+          ttl: GPTK::AI::CONFIG[:gemini_ttl]
+        }
+
+        # Output the payload JSON size and a snippet
+        puts "Request payload size: #{request_payload.to_json.size}"
+        puts "Request payload snippet: #{request_payload.to_json[0..499]}"
+
+        # Send the request to the Gemini API
+        cache_response = HTTParty.post(
+          "https://generativelanguage.googleapis.com/v1beta/cachedContents?key=#{api_key}",
+          headers: { 'Content-Type' => 'application/json' },
+          body: request_payload.to_json
+        )
+
+        # Check for errors and log the full response body
+        puts "Cache API response code: #{cache_response.code}"
+        puts "Cache API response body: #{cache_response.body}"
+        unless cache_response.code == 200
+          raise "Error uploading file to Gemini: #{cache_response.body}"
+        end
+
+        cache_name = JSON.parse(cache_response.body)['name']
+
+        # If a prompt is given, run the three queries
+        if prompt
+          file_types = { erb: 'ERB', sass: 'SASS', coffee: 'CoffeeScript' }
+          file_types.each do |file_type, label|
+            query_payload = {
+              contents: [
+                { role: 'user', parts: [{ text: "Generate #{label} code based on the uploaded content." }] }
+              ],
+              cachedContent: cache_name
+            }
+
+            response = HTTParty.post(
+              "https://generativelanguage.googleapis.com/v1beta/models/#{CONFIG[:google_gpt_model]}-001:generateContent?key=#{api_key}",
+              headers: { 'Content-Type' => 'application/json' },
+              body: query_payload.to_json
+            )
+
+            # Log each response's details
+            puts "Query response for #{label}: Code: #{response.code}, Body: #{response.body}"
+            if response.code == 200
+              generated_code = JSON.parse(response.body).dig('contents', 0, 'parts', 0, 'text')
+              file_path = GPTK::CONFIG[:rails]["#{file_type}_file_path".to_sym]
+              File.write(file_path, generated_code)
+              puts "Successfully wrote #{label} code to #{file_path}"
+            else
+              puts "Error generating #{label} code: #{response.body}"
+            end
+          end
+        else
+          # If no prompt, enter user input loop
+          loop do
+            print "Enter a prompt (or 'exit' to quit): "
+            input = gets.chomp
+            break if input.downcase == 'exit'
+
+            file_types = { erb: 'ERB', sass: 'SASS', coffee: 'CoffeeScript' }
+            file_types.each do |file_type, label|
+              query_payload = {
+                contents: [
+                  { role: 'user', parts: [{ text: "Generate #{label} code based on the uploaded content." }] }
+                ],
+                cachedContent: cache_name # Pass cache name directly
+              }
+
+              puts "Query payload for #{label}: #{query_payload.to_json}"
+
+              response = HTTParty.post(
+                "https://generativelanguage.googleapis.com/v1beta/generate?key=#{api_key}",
+                headers: { 'Content-Type' => 'application/json' },
+                body: query_payload.to_json
+              )
+
+              # Log response details
+              puts "Query response for #{label}: Code: #{response.code}, Body: #{response.body}"
+              if response.code == 200
+                generated_code = JSON.parse(response.body).dig('contents', 0, 'parts', 0, 'text')
+                file_path = GPTK::CONFIG[:rails]["#{file_type}_file_path".to_sym]
+                File.write(file_path, generated_code)
+                puts "Successfully wrote #{label} code to #{file_path}"
+              else
+                puts "Error generating #{label} code: #{response.body}"
+              end
+            end
+          end
+        end
+      end
     end
 
     def self.last_output
