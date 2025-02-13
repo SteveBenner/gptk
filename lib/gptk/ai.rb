@@ -349,6 +349,113 @@ module GPTK
         end
       end
 
+      def self.query_to_rails_code(client, content_file: nil, assistant_id: nil, prompt: nil)
+        require 'base64'
+        require 'json'
+        require 'awesome_print'
+
+        raise 'Content file is required' if content_file.nil?
+
+        # Read and encode the file as Base64
+        file_content = File.read(content_file, mode: 'rb')
+        base64_content = Base64.strict_encode64(file_content)
+
+        # Add the base64 string to the prompt
+        initial_prompt = <<~PROMPT
+    Analyze the following base64-encoded JPG image and generate code based on its design elements. 
+    ONLY output raw code in the specified format. 
+    Use SASS style without semicolons, reserve JavaScript for the CoffeeScript file, and avoid including it in ERB. 
+    Here is the base64-encoded image:
+    #{base64_content}
+  PROMPT
+
+        # Use existing assistant or create a new one
+        assistant_id ||= client.assistants.create(
+          parameters: {
+            name: 'Rails Code Generator',
+            instructions: 'Generate Rails code based on the provided base64-encoded image and user prompts.'
+          }
+        )['id']
+
+        puts "Using assistant with ID: #{assistant_id}"
+
+        # Create a thread for interaction
+        thread_response = client.threads.create
+        thread_id = thread_response['id']
+
+        # Send the initial prompt to the thread
+        client.messages.create(
+          thread_id: thread_id,
+          parameters: { role: 'user', content: initial_prompt }
+        )
+
+        puts "Thread created successfully with ID: #{thread_id}"
+
+        # Start user interaction loop
+        loop do
+          print 'Enter your prompt (type "exit" to quit): '
+          user_input = gets.strip
+          break if user_input.downcase == 'exit'
+
+          # File types and labels for generation
+          file_types = { erb: 'ERB', sass: 'SASS', coffeescript: 'CoffeeScript' }
+
+          # Process each file type
+          file_types.each do |file_type, label|
+            puts "Generating #{label} code..."
+
+            # Add the user prompt to the message
+            client.messages.create(
+              thread_id: thread_id,
+              parameters: { role: 'user', content: "#{user_input}. Generate #{label} code." }
+            )
+
+            run_response = client.runs.create(thread_id: thread_id, parameters: { assistant_id: assistant_id })
+            run_id = run_response['id']
+
+            # Poll the run status
+            loop do
+              status_response = client.runs.retrieve(id: run_id, thread_id: thread_id)
+              status = status_response['status']
+              break if status == 'completed'
+
+              puts "Status: #{status}. Waiting..."
+              sleep 2
+            end
+
+            # Retrieve and save the generated code
+            messages = client.messages.list(thread_id: thread_id)['data']
+            latest_message = messages.last
+            ap latest_message['content'].first
+            generated_code = latest_message['content'].first['text']['value'] if latest_message
+
+            if generated_code
+              # Ensure `generated_code` is a string before using `gsub`
+              if generated_code.is_a?(Array)
+                generated_code = generated_code.join("\n") # Join array elements into a single string
+              end
+              generated_code = generated_code.gsub(/```.*\n/, '').strip # Remove markdown and extra spaces
+
+              file_path = GPTK::CONFIG[:rails]["#{file_type}_file_path".to_sym]
+              File.write(file_path, generated_code)
+              puts "Successfully wrote #{label} code to #{file_path}"
+            else
+              puts "Error: No #{label} code generated."
+            end
+
+            if generated_code
+              generated_code = generated_code.gsub(/```.*\n/, '').strip
+              file_path = GPTK::CONFIG[:rails]["#{file_type}_file_path".to_sym]
+              File.write(file_path, generated_code)
+              puts "Successfully wrote #{label} code to #{file_path}"
+            else
+              puts "Error: No #{label} code generated."
+            end
+          end
+        end
+
+        puts 'Rails code generation completed!'
+      end
       private
 
       def self.generate_batch_file(prompts)
@@ -746,20 +853,30 @@ module GPTK
 
         raise 'Content file is required' if content_file.nil?
 
+        # Configuration
         min_tokens = GPTK::AI::CONFIG[:gemini_min_cache_tokens]
+        bytes_per_token = 4
+        min_length = min_tokens * bytes_per_token
         model = GPTK::AI::CONFIG[:google_gpt_model]
 
         # Lambda to create the cache
         create_cache = lambda do |api_key, model, file_path, min_tokens|
-          bytes_per_token = 4
-          min_length = min_tokens * bytes_per_token
+          # Read raw image file
+          file_content = File.binread(content_file)
+
+          # Calculate padding
+          padding_needed = [0, min_length - file_content.bytesize].max
+          padded_content = file_content + ('F' * padding_needed)
+
+          # Encode combined content
+          base64_content = Base64.strict_encode64(padded_content)
 
           # Use Linux CLI `base64` to encode the file
-          base64_content = `base64 -i #{Shellwords.escape(file_path)}`.strip
+          # base64_content = `base64 -i #{Shellwords.escape(file_path)}`.strip
 
           # Calculate and add padding
-          padding_needed = [0, min_length - base64_content.bytesize].max
-          padded_content = base64_content
+          # padding_needed = [0, min_length - base64_content.bytesize].max
+          # padded_content = base64_content + Base64.strict_encode64('F' * padding_needed)
 
           # Debug logging
           puts "Original file size: #{File.size(file_path)} bytes"
@@ -775,7 +892,7 @@ module GPTK
                   {
                     inline_data: {
                       mime_type: 'image/jpeg',
-                      data: padded_content
+                      data: base64_content
                     }
                   }
                 ],
