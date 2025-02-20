@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 module GPTK
   module AI
     CONFIG = {
@@ -7,10 +8,11 @@ module GPTK
       # - gpt-4o-mini (affordable and intelligent small model for fast, lightweight tasks.)
       # - o1-preview (reasoning model designed to solve hard problems across domains.)
       # - o1-mini (faster and cheaper reasoning model particularly good at coding, math, and science.)
+      # - o3-mini (most recent small reasoning model, providing high intelligence at the same cost and latency targets.)
       # - gpt-4-turbo (a large multimodal model that can accept text or image inputs and output text,
       #   solving complex problems more accurately than previous models)
-      openai_gpt_model: 'gpt-4o-mini',
-      openai_temperature: 0.7, # Less = more precise, less creative; more = more expansive & creative
+      openai_gpt_model: 'o3-mini',
+      openai_temperature: 0.2, # Less = more precise, less creative; more = more expansive & creative
       openai_max_tokens: 8192, # GTP-4 max output tokens per request,
       batch_ping_interval: 60, # How long in seconds to wait before checking on the status of a Batch
       # Available Anthropic API models:
@@ -28,9 +30,9 @@ module GPTK
       # - gemini-1.5-flash (fast and versatile)
       # - gemini-1.5-flash-8b (high volume and lower intelligence)
       # - gemini-1.5-pro (complex reasoning and more intelligence)
-      google_gpt_model: 'models/gemini-1.5-pro-001', # Specify 001 to indicate caching feature support
+      google_gpt_model: 'gemini-1.5-pro-001', # Specify 001 to indicate caching feature support
       gemini_ttl: '300s', # Amount of time cached tokens are stored
       gemini_min_cache_tokens: 32768 # Number of min tokens required for using caching
-    }
+    }.freeze
   end
 end

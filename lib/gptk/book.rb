@@ -1192,7 +1192,7 @@ module GPTK
     #   - To revert revisions, additional functionality should be implemented as noted in the TODO.
     #
     # @todo Add functionality to revert revisions by operation.
-    def revise_chapter(chapter, op: nil, agent: nil, chatgpt_client: @chatgpt_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
+    def revise_chapter(chapter, op: nil, agent: nil, chatgpt_client: @chatgpt_client, claude_client: @claude_client, anthropic_api_key: @anthropic_api_key, xai_api_key: @xai_api_key, google_api_key: @google_api_key)
       # TODO: add method to revert revisions (BY OPERATION)
       chapter_text = chapter.instance_of?(String) ? chapter : chapter.join # Array of fragments
       revised_chapter_text = ''
