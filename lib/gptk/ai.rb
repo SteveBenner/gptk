@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 Bundler.require :default, :ai
-require_relative 'ai/chat_gpt'
-require_relative 'ai/claude'
-require_relative 'ai/grok'
-require_relative 'ai/gemini'
+load "#{__dir__}/ai/chat_gpt.rb" # TODO: change to 'require' for production
+load "#{__dir__}/ai/claude.rb"   # TODO: change to 'require' for production
+load "#{__dir__}/ai/grok.rb"     # TODO: change to 'require' for production
+load "#{__dir__}/ai/gemini.rb"   # TODO: change to 'require' for production
 
 module GPTK
   # AI interfaces and tools

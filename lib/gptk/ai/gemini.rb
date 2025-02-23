@@ -174,19 +174,23 @@ module GPTK
           }
 
           loop do
-            print "\nEnter additional prompt (or 'exit' to quit): "
-            user_input = gets.chomp
-
-            break if user_input.downcase == 'exit'
+            current_prompt = if prompt
+                               prompt
+                             else
+                               print "\nEnter additional prompt (or 'exit' to quit): "
+                               user_input = gets.chomp
+                               break if user_input.downcase == 'exit'
+                               user_input
+                             end
 
             file_paths.each do |type, file_path|
               base_prompt = case type
                             when :erb
-                              "Generate only pure ERB/HTML code for Rails. Do not include any markdown, code blocks, or explanatory text. "
+                              "Generate only pure ERB/HTML code for Rails using semantic-ui components. Do not include any markdown, code blocks, or explanatory text. "
                             when :sass
-                              "Generate only pure SASS code for Rails. Do not include any markdown, code blocks, or explanatory text. "
+                              "Generate only pure SASS code for Rails (be sure to generate sass syntax, not css or scss) using semantic-ui components. Do not include any markdown, code blocks, or explanatory text. "
                             when :coffee
-                              "Generate only pure CoffeeScript code for Rails. Do not include any markdown, code blocks, or explanatory text. "
+                              "Generate only pure CoffeeScript code for Rails using semantic-ui components. Do not include any markdown, code blocks, or explanatory text. "
                             end
 
               full_prompt = "#{base_prompt}Current code state:\n\n"
@@ -196,28 +200,43 @@ module GPTK
                 full_prompt += "#{current_code}\n\n"
               end
 
-              full_prompt += "Additional requirements: #{user_input}\n\n"
+              full_prompt += "Additional requirements: #{current_prompt}\n\n"
               full_prompt += "Remember: Output ONLY the raw code without any formatting, explanation, or code block delimiters."
 
               result = generate_single_response(api_key, content_file, full_prompt, model)
 
-              # Ensure the directory exists
-              FileUtils.mkdir_p(File.dirname(file_path))
+              # Strip code blocks if present
+              result = strip_code_blocks(result)
 
-              # Write the result to the file
+              FileUtils.mkdir_p(File.dirname(file_path))
               File.write(file_path, result)
 
               puts "\nGenerated #{type.upcase} code written to: #{file_path}"
               puts "Preview of generated content:"
               puts "-" * 40
-              puts result.lines.first(5).join # Show first 5 lines as preview
+              puts result.lines.first(5).join
               puts "..." if result.lines.count > 5
               puts "-" * 40 + "\n"
             end
+
+            break if prompt # Exit after one iteration if prompt was provided
           end
         end
 
         private
+
+        def strip_code_blocks(text)
+          lines = text.lines
+
+          # Return original text if it's not wrapped in code blocks
+          return text unless lines.first&.match?(/^```\w*$/) && lines.last&.match?(/^```$/)
+
+          # Remove first and last lines if they're code block markers
+          lines = lines[1..-2] if lines.first.match?(/^```\w*$/) && lines.last.match?(/^```$/)
+
+          # Join the remaining lines back together
+          lines.join
+        end
 
         def generate_single_response(api_key, content_file, prompt, model)
           parts = [{ text: prompt }]
