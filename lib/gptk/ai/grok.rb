@@ -1,4 +1,4 @@
-# frozen_string_literal: true
+require 'io/console'
 
 module GPTK
   module AI
@@ -147,9 +147,20 @@ module GPTK
             current_prompt = if prompt
                                prompt
                              else
-                               print "\nEnter additional prompt (or 'exit' to quit): "
-                               user_input = gets.chomp
-                               break if user_input.downcase == 'exit'
+                               puts "\nEnter prompt for Grok (finish input with CTRL-D); type 'exit' to terminate loop:"
+                               user_input = ''
+                               $stdin.raw do |io|
+                                 loop do
+                                   char = io.getc
+                                   break if char == "\x04" # CTRL-D
+
+                                   user_input << (char || '')
+                                 end
+                               end
+                               user_input = user_input.chomp
+                               break if user_input == 'exit'
+
+                               puts "Submitting user input... #{user_input}"
 
                                user_input
                              end
