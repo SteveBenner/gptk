@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 module GPTK
   module AI
     CONFIG = {
@@ -8,10 +9,10 @@ module GPTK
       # - gpt-4o-mini (affordable and intelligent small model for fast, lightweight tasks.)
       # - o1-preview (reasoning model designed to solve hard problems across domains.)
       # - o1-mini (faster and cheaper reasoning model particularly good at coding, math, and science.)
-      # - o3-mini (most recent small reasoning model, providing high intelligence at the same cost and latency targets.)
       # - gpt-4-turbo (a large multimodal model that can accept text or image inputs and output text,
       #   solving complex problems more accurately than previous models)
-      openai_gpt_model: 'o3-mini',
+      # - gpt-4.5-preview
+      openai_gpt_model: 'gpt-4.5-preview',
       openai_temperature: 0.2, # Less = more precise, less creative; more = more expansive & creative
       openai_max_tokens: 8192, # GTP-4 max output tokens per request,
       batch_ping_interval: 60, # How long in seconds to wait before checking on the status of a Batch

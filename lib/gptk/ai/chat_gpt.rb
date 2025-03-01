@@ -44,7 +44,6 @@ module GPTK
         }
         @last_output = response
         response
-        # TODO: track token usage
       end
 
       # Creates a new assistant using the specified client and configuration parameters.

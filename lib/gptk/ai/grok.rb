@@ -143,67 +143,65 @@ module GPTK
             coffee: GPTK::CONFIG[:rails][:coffeescript_file_path]
           }
 
+          # Flag to handle the first iteration differently if a prompt is provided
+          first_iteration = true
+
           loop do
-            current_prompt = if prompt
-                               prompt
-                             else
-                               puts "\nEnter prompt for Grok (finish input with CTRL-D); type 'exit' to terminate loop:"
-                               user_input = ''
-                               $stdin.raw do |io|
-                                 loop do
-                                   char = io.getc
-                                   break if char == "\x04" # CTRL-D
+            # Handle the initial prompt or ask for user input
+            if first_iteration && prompt
+              current_prompt = prompt
+              first_iteration = false
+            else
+              print "\nEnter prompt (or 'exit' to quit): "
+              user_input = gets.chomp
+              break if user_input.downcase == 'exit'
+              puts 'Submitting query to Grok...'
+              current_prompt = user_input
+            end
 
-                                   user_input << (char || '')
-                                 end
-                               end
-                               user_input = user_input.chomp
-                               break if user_input == 'exit'
+            # Read the current code state of all three files
+            current_codes = {}
+            file_paths.each do |type, path|
+              current_codes[type] = File.exist?(path) ? File.read(path) : 'No current code.'
+            end
 
-                               puts "Submitting user input... #{user_input}"
-
-                               user_input
-                             end
-
+            # Generate code for each file type
             file_paths.each do |type, file_path|
+              # Define the base prompt specific to the file type
               base_prompt = case type
                             when :erb
-                              'Generate only pure ERB/HTML code for Rails using Fomantic-UI components. Do not include \
-                              any markdown, code blocks, or explanatory text. '
+                              'Generate only pure ERB/HTML code for Rails using Fomantic-UI components. Do not include any markdown, code blocks, or explanatory text. '
                             when :sass
-                              'Generate only pure SASS code for Rails (be sure to generate SASS syntax, not CSS or \
-                              SCSS) using Fomantic-UI components. Do not include any markdown, code blocks, or \
-                              explanatory text. '
+                              'Generate only pure SASS code for Rails (be sure to generate SASS syntax, not CSS or SCSS) using Fomantic-UI components. Do not include any markdown, code blocks, or explanatory text. '
                             when :coffee
                               'Generate only pure CoffeeScript code for Rails using Fomantic-UI components. Do not include any markdown, code blocks, or explanatory text. '
-                            else raise 'Invalid file type.'
+                            else
+                              raise 'Invalid file type.'
                             end
 
+              # Build the full prompt with all three files' current code states
               full_prompt = "#{base_prompt}Current code state:\n\n"
-
-              if File.exist?(file_path)
-                current_code = File.read(file_path)
-                full_prompt += "#{current_code}\n\n"
-              end
-
+              full_prompt += "ERB code:\n\n```\n#{current_codes[:erb]}\n```\n\n"
+              full_prompt += "SASS code:\n\n```\n#{current_codes[:sass]}\n```\n\n"
+              full_prompt += "CoffeeScript code:\n\n```\n#{current_codes[:coffee]}\n```\n\n"
               full_prompt += "Additional requirements: #{current_prompt}\n\n"
-              full_prompt += "If an image file is provided, incorporate its analysis into the 4-quadrant layout \
-                             (e.g., display the image, use analysis results for descriptions or interactions). \
-                             Remember: Output ONLY the raw code without any formatting, explanation or code delimiters."
+              full_prompt += 'If an image file is provided, incorporate its analysis into the 4-quadrant layout (e.g., display the image, use analysis results for descriptions or interactions). Remember: Output ONLY the raw code without any formatting, explanation or code delimiters.'
 
-              # Use upload_and_generate_response for image uploads, or generate_single_response for text-only prompts
+              # Generate the code (with image support if provided)
               result = if content_file && File.exist?(content_file)
                          upload_and_generate_response(api_key, content_file, full_prompt, 'grok-2-vision-latest')
                        else
                          generate_single_response(api_key, full_prompt, model)
                        end
 
-              # Strip code blocks if present
+              # Strip code blocks from the result
               result = strip_code_blocks(result)
 
+              # Write the generated code to the file
               FileUtils.mkdir_p(File.dirname(file_path))
               File.write(file_path, result)
 
+              # Display a preview of the generated code
               puts "\nGenerated #{type.upcase} code written to: #{file_path}"
               puts 'Preview of generated content:'
               puts '-' * 40
@@ -211,8 +209,6 @@ module GPTK
               puts '...' if result.lines.count > 5
               puts "#{'-' * 40}\n"
             end
-
-            break if prompt # Exit after one iteration if a prompt was provided
           end
         end
 

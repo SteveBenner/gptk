@@ -69,6 +69,7 @@ module GPTK
           data[:cached_tokens] += response.dig 'usage', 'prompt_tokens_details', 'cached_tokens'
         end
         sleep 1 # Important to avoid race conditions and especially token throttling!
+
         # Return the AI's response message (object deconstruction must be ABSOLUTELY precise!)
         output = if client.instance_of? OpenAI::Client
                    response.dig 'choices', 0, 'message', 'content'
@@ -83,6 +84,7 @@ module GPTK
             sleep 10
           end
         end
+
         output
       end
 

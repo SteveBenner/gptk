@@ -3,10 +3,11 @@
 source 'https://rubygems.org'
 
 gem 'net-imap', '0.5.4'
-gem "faraday"
+gem 'rb-readline' # For bypassing the default readline input limit of 1024 chars
 
 gem 'awesome_print' # Pretty data output
 gem 'dotenv' # Local management of sensitive data
+gem 'faraday'
 gem 'httparty' # For manual HTTP calls
 
 group :ai do

@@ -183,6 +183,6 @@ Provide specific revisions or examples to illustrate these improvements.",
         # TODO: parse out 'FRAGMENT' instances
         # TODO: parse out sub headings within fragments
       }
-    }
+    }.freeze
   end
 end

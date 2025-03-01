@@ -3620,7 +3620,7 @@ Style/CombinableLoops:
   Description: >-
                   Checks for places where multiple consecutive loops over the same data
                   can be combined into a single loop.
-  Enabled: true
+  Enabled: false
   Safe: false
   VersionAdded: '0.90'
 

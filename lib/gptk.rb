@@ -5,6 +5,7 @@ require 'fileutils'
 require 'open3'
 require 'set'
 require 'bundler'
+Bundler.require :default
 %w[ai book config doc text utils].each do |lib|
   print "Loading module: #{lib.capitalize}... "
   load "#{__dir__}/gptk/#{lib}.rb" # TODO: change to use 'require' for production
