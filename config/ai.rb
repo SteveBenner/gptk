@@ -12,8 +12,8 @@ module GPTK
       # - gpt-4-turbo (a large multimodal model that can accept text or image inputs and output text,
       #   solving complex problems more accurately than previous models)
       # - gpt-4.5-preview
-      openai_gpt_model: 'gpt-4.5-preview',
-      openai_temperature: 0.2, # Less = more precise, less creative; more = more expansive & creative
+      openai_gpt_model: 'o1-mini',
+      openai_temperature: 1, # Less = more precise, less creative (for some models '1' is required)
       openai_max_tokens: 8192, # GTP-4 max output tokens per request,
       batch_ping_interval: 60, # How long in seconds to wait before checking on the status of a Batch
       # Available Anthropic API models:

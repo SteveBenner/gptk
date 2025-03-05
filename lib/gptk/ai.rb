@@ -99,6 +99,7 @@ module GPTK
       # @param doc [Object] An instance containing the AI client and data context for querying.
       # @param items [Array<String>] The list of items to be categorized.
       # @param categories [String] A string describing the available categories, typically enumerated.
+      # @param model [String, nil] Optional model identifier to override the default model in CONFIG.
       #
       # @return [Hash] A hash where keys are category numbers (integers) and values are arrays of items
       #   belonging to those categories.
@@ -108,6 +109,13 @@ module GPTK
       #   items = ["Apple", "Carrot", "Chicken"]
       #   categories = "1. Fruit\n2. Vegetable\n3. Protein"
       #   AI.categorize_items(doc, items, categories)
+      #   # => { 1 => ["Apple"], 2 => ["Carrot"], 3 => ["Chicken"] }
+      #
+      # @example Categorizing with a specific model:
+      #   doc = Document.new(client: ChatGPT::Client.new, data: { prompt_tokens: 0 })
+      #   items = ["Apple", "Carrot", "Chicken"]
+      #   categories = "1. Fruit\n2. Vegetable\n3. Protein"
+      #   AI.categorize_items(doc, items, categories, model: "gpt-4o")
       #   # => { 1 => ["Apple"], 2 => ["Carrot"], 3 => ["Chicken"] }
       #
       # @note
@@ -120,7 +128,7 @@ module GPTK
       # @raise [Abort] If the input items or categories are empty, or no output is generated.
       #
       # @see ChatGPT.query
-      def categorize_items(client, items, categories)
+      def categorize_items(client, items, categories, model: nil)
         abort 'Error: no items found!' if items.empty?
         abort 'Error: no categories found!' if categories.empty?
         puts "Categorizing #{items.count} items..."
@@ -141,7 +149,7 @@ module GPTK
         end
 
         # Run the batch and get responses (one response per item/prompt)
-        responses = ChatGPT.run_batch(client, prompts)
+        responses = ChatGPT.run_batch(client, prompts, model: model)
 
         # Build a hash: { "item_text" => category_number }
         item_category_map = {}
