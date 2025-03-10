@@ -22,8 +22,9 @@ module GPTK
       # - claude-3-opus-latest
       # - claude-3-sonnet-20240229
       # - claude-3-haiku-20240307
-      anthropic_gpt_model: 'claude-3-5-sonnet-latest',
-      anthropic_max_tokens: 1024,
+      anthropic_gpt_model: 'claude-3-7-sonnet-latest',
+      anthropic_max_tokens: 8192, # Must be larger than 'thinking budget'
+      anthropic_thinking_budget: 4096, # Tokens available for 'extended thinking'
       # Grok only has one available model currently
       xai_gpt_model: 'grok-2-latest',
       xai_temperature: 0,
