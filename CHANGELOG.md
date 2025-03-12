@@ -2,6 +2,15 @@
 
 Note - Every reference to modules and classes assumes we are operating under the `GPTK` namespace. For example, the `Book` class refers to `GPTK::Book`, and the `AI` module refers to `GPTK::AI`.
 
+## 0.23 / 2025.03.11
+- Added generic `AutoCoder` class to the `AI` module. You initialize a new `AutoCoder` object with one or more API keys determining which AI platforms you will use. `AutoCoder#query_to_rails_code` allows you to then generate revisions to multiple existing rails projects per single query, looping for user interaction.
+- Various fixes to `AutoCoder`
+- ChatGPT client gem `ruby-openai` is broken at this point. Wrote a workaround method `AI::ChatGPT::query_with_assistant` which manually uses HTTP to let you use the assistant API (takes `assistant_id` as required argument and `thread_id` as an optional keyword argument)
+- Fixed Gemini queries
+
+## 0.22 / 2025.03.09
+- Added `AI:Claude::query_to_rails_code` using Claude Sonnet 3.7 with enhanced thinking capabilities
+
 ## 0.21 / 2025.02.22
 - Added `AI::Grok::query_to_rails_code` (and several helper methods) for generating/rewriting rails code. It works super well.
 

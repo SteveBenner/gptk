@@ -212,8 +212,6 @@ module GPTK
           end
         end
 
-        private
-
         # Uploads an image file (base64-encoded) and generates a response from the Grok API for image understanding.
         #
         # @param api_key [String] The API key for accessing the Grok API.
@@ -307,6 +305,8 @@ module GPTK
             retry
           end
         end
+
+        private
 
         def strip_code_blocks(text)
           lines = text.lines

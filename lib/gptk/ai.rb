@@ -5,6 +5,7 @@ load "#{__dir__}/ai/chat_gpt.rb" # TODO: change to 'require' for production
 load "#{__dir__}/ai/claude.rb"   # TODO: change to 'require' for production
 load "#{__dir__}/ai/grok.rb"     # TODO: change to 'require' for production
 load "#{__dir__}/ai/gemini.rb"   # TODO: change to 'require' for production
+load "#{__dir__}/ai/auto_coder.rb"   # TODO: change to 'require' for production
 
 module GPTK
   # AI interfaces and tools

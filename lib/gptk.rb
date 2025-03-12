@@ -15,7 +15,7 @@ end
 # GPT Kit - A collection of useful tools for interacting with GPT agents and generating content
 module GPTK
   START_TIME = Time.now
-  VERSION = '0.21'.freeze
+  VERSION = '0.23'.freeze
 
   # Load configuration files
   Config.load_main_setup

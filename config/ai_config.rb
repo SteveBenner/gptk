@@ -12,7 +12,7 @@ module GPTK
       # - gpt-4-turbo (a large multimodal model that can accept text or image inputs and output text,
       #   solving complex problems more accurately than previous models)
       # - gpt-4.5-preview
-      openai_gpt_model: 'o1-mini',
+      openai_gpt_model: 'o3-mini',
       openai_temperature: 1, # Less = more precise, less creative (for some models '1' is required)
       openai_max_tokens: 8192, # GTP-4 max output tokens per request,
       batch_ping_interval: 60, # How long in seconds to wait before checking on the status of a Batch
@@ -36,6 +36,6 @@ module GPTK
       google_gpt_model: 'gemini-1.5-pro-001', # Specify 001 to indicate caching feature support
       gemini_ttl: '300s', # Amount of time cached tokens are stored
       gemini_min_cache_tokens: 32768 # Number of min tokens required for using caching
-    }.freeze
+    }
   end
 end

@@ -218,6 +218,122 @@ module GPTK
         response
       end
 
+      # Queries an OpenAI Assistant using raw HTTP requests to the Assistants API.
+      #
+      # This method sends a prompt to an assistant via the OpenAI Assistants API, using an existing thread
+      # or creating a new one if none is provided. If a new thread is created, it updates CONFIG[:chatgpt_thread].
+      #
+      # @param api_key [String] The API key for authenticating with OpenAI.
+      # @param assistant_id [String] The ID of the assistant to query.
+      # @param prompt [String] The user input prompt to send to the assistant.
+      # @param thread_id [String, nil] The thread ID to use; defaults to CONFIG[:chatgpt_thread]. If nil, creates a new thread.
+      # @param model [String] The model to use, defaults to CONFIG[:openai_gpt_model].
+      #
+      # @return [String] The assistant's response text.
+      #
+      # @example Querying with an existing thread:
+      #   api_key = "your_openai_api_key"
+      #   assistant_id = "asst_Yoc4YPEcDjGryavKVOaxcRKn"
+      #   prompt = "What is the capital of France?"
+      #   thread_id = "thread_123"
+      #   response = GPTK::AI::ChatGPT.query_with_assistant(api_key, assistant_id, prompt, thread_id: thread_id)
+      #   # => "The capital of France is Paris."
+      #
+      # @example Querying with a new thread:
+      #   response = GPTK::AI::ChatGPT.query_with_assistant(api_key, assistant_id, prompt)
+      #   # Creates new thread and updates CONFIG[:chatgpt_thread]
+      #
+      # @note
+      #   - Uses HTTParty for raw HTTP requests.
+      #   - Polls run status with a 2-second delay until completion.
+      #   - Updates CONFIG[:chatgpt_thread] if a new thread is created.
+      #
+      # @raise [RuntimeError] If the API returns an error or the response cannot be parsed.
+      def self.query_with_assistant(api_key, assistant_id, prompt, thread_id: GPTK::AI::CONFIG[:chatgpt_thread], model: GPTK::AI::CONFIG[:openai_gpt_model])
+        base_url = 'https://api.openai.com/v1'
+        headers = {
+          'Content-Type' => 'application/json',
+          'Authorization' => "Bearer #{api_key}",
+          'OpenAI-Beta' => 'assistants=v2' # Required for Assistants API v2
+        }
+
+        # Step 1: Use existing thread or create a new one
+        if thread_id.nil?
+          thread_response = HTTParty.post(
+            "#{base_url}/threads",
+            headers: headers,
+            body: {}.to_json
+          )
+          unless thread_response.success?
+            raise "Failed to create thread: #{thread_response.code} - #{thread_response.body}"
+          end
+          thread_id = JSON.parse(thread_response.body)['id']
+          # Update CONFIG[:chatgpt_thread] for continuity
+          GPTK::AI::CONFIG[:chatgpt_thread] = thread_id
+          puts "Created new thread: #{thread_id}"
+        end
+
+        # Step 2: Add the prompt as a message to the thread
+        message_response = HTTParty.post(
+          "#{base_url}/threads/#{thread_id}/messages",
+          headers: headers,
+          body: {
+            role: 'user',
+            content: prompt
+          }.to_json
+        )
+        unless message_response.success?
+          raise "Failed to add message: #{message_response.code} - #{message_response.body}"
+        end
+
+        # Step 3: Run the assistant on the thread
+        run_response = HTTParty.post(
+          "#{base_url}/threads/#{thread_id}/runs",
+          headers: headers,
+          body: {
+            assistant_id: assistant_id,
+            model: model
+          }.to_json
+        )
+        unless run_response.success?
+          raise "Failed to create run: #{run_response.code} - #{run_response.body}"
+        end
+        run_id = JSON.parse(run_response.body)['id']
+
+        # Step 4: Poll the run status until completed
+        loop do
+          status_response = HTTParty.get(
+            "#{base_url}/threads/#{thread_id}/runs/#{run_id}",
+            headers: headers
+          )
+          unless status_response.success?
+            raise "Failed to retrieve run status: #{status_response.code} - #{status_response.body}"
+          end
+          status = JSON.parse(status_response.body)['status']
+          break if status == 'completed'
+          if %w[cancelled failed expired].include?(status)
+            raise "Run failed with status '#{status}': #{status_response.body}"
+          end
+          sleep 2 # Wait 2 seconds before polling again
+        end
+
+        # Step 5: Retrieve the assistant's response
+        messages_response = HTTParty.get(
+          "#{base_url}/threads/#{thread_id}/messages",
+          headers: headers
+        )
+        unless messages_response.success?
+          raise "Failed to retrieve messages: #{messages_response.code} - #{messages_response.body}"
+        end
+        messages = JSON.parse(messages_response.body)['data']
+        assistant_message = messages.find { |msg| msg['role'] == 'assistant' }
+        unless assistant_message
+          raise "No assistant response found in thread: #{messages_response.body}"
+        end
+
+        assistant_message['content'].first['text']['value']
+      end
+
       def self.run_batch(client, prompts, model: nil)
         # Create the batch file, a temporary file named `batch.jsonl`
         puts 'Generating batch file...'

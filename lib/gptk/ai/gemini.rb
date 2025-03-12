@@ -14,6 +14,8 @@ module GPTK
       }.freeze
 
       class << self
+        attr_reader :last_output
+
         # Sends a query to the Gemini API and retrieves the AI's response.
         #
         # This method constructs an HTTP request to the Gemini API, sending a user prompt and specifying
@@ -122,48 +124,45 @@ module GPTK
         def query_with_cache(api_key, body, model = CONFIG[:google_gpt_model])
           max_retries = 5
           retries = 0
+          output = nil
 
-          begin
-            response = HTTParty.post(
-              "#{BASE_URL}/#{model}:generateContent?key=#{api_key}",
-              headers: { 'content-type' => 'application/json' },
-              body: body.to_json
-            )
+          while retries <= max_retries
+            begin
+              response = HTTParty.post(
+                "#{BASE_URL}/models/#{model}:generateContent?key=#{api_key}",
+                headers: { 'content-type' => 'application/json' },
+                body: body.to_json
+              )
 
-            # Explicitly check the response body for nil or empty
-            raise 'Unexpected response: Body is nil or empty.' if response.body.nil? || response.body.empty?
+              # Check for nil or empty body
+              raise 'Unexpected response: Body is nil or empty.' if response.body.nil? || response.body.empty?
 
-            # Parse the response to extract the output
-            output = JSON.parse(response.body).dig('candidates', 0, 'content', 'parts', 0, 'text')
+              # Parse the response to extract the output
+              output = JSON.parse(response.body).dig('candidates', 0, 'content', 'parts', 0, 'text')
+              raise "Empty or nil output received: #{response.body.inspect}" if output.nil? || output.empty?
 
-            # Check if the output is nil or empty
-            raise "Empty or nil output received: #{response.body.inspect}" if output.nil? || output.empty?
-
-            output
-          rescue JSON::ParserError => e
-            puts "JSON Parsing Error: #{e.class}: #{e.message}. Retrying..."
-            retries += 1
-            raise 'Exceeded maximum retries due to JSON parsing errors.' unless retries <= max_retries
-
-            sleep(5)
-            retry
-          rescue Errno::ECONNRESET, Net::ReadTimeout => e
-            puts "Network Error: #{e.class}: #{e.message}. Retrying..."
-            retries += 1
-            raise 'Exceeded maximum retries due to network errors.' unless retries <= max_retries
-
-            sleep(5)
-            retry
-          rescue => e
-            puts "Unexpected Error: #{e.class}: #{e.message}. Raw Response: #{response&.body.inspect}"
-            retries += 1
-            raise 'Exceeded maximum retries due to unexpected errors.' unless retries <= max_retries
-
-            sleep(5)
-            retry
-          ensure
-            @last_output = output
+              break # Exit loop on success
+            rescue JSON::ParserError => e
+              puts "JSON Parsing Error: #{e.class}: #{e.message}. Retrying..."
+              retries += 1
+              yield retries if block_given?
+              sleep(5)
+            rescue Errno::ECONNRESET, Net::ReadTimeout => e
+              puts "Network Error: #{e.class}: #{e.message}. Retrying..."
+              retries += 1
+              yield retries if block_given?
+              sleep(5)
+            rescue => e
+              puts "Unexpected Error: #{e.class}: #{e.message}. Raw Response: #{response&.body.inspect}"
+              retries += 1
+              yield retries if block_given?
+              sleep(5)
+            end
           end
+
+          raise 'Exceeded maximum retries due to unexpected errors.' if output.nil?
+          @last_output = output
+          output
         end
 
         def query_to_rails_code(api_key, content_file: nil, prompt: nil, model: CONFIG[:google_gpt_model])

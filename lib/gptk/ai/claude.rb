@@ -9,120 +9,76 @@ module GPTK
         #
         # This method sends user messages to the Claude API and retrieves a response. It handles
         # string-based or array-based inputs, dynamically constructs the request body and headers,
-        # and parses the response for the AI's output. If errors occur, the method retries the query.
+        # and parses the response for the AI's output. If errors occur, the method retries the query
+        # up to a maximum number of times, yielding retry counts to a block if provided.
         #
         # @param api_key [String] The API key for accessing the Claude API.
         # @param messages [String, Array<Hash>] The user input to be sent to the Claude API. If a string
         #   is provided, it is converted into an array of message hashes with `role` and `content` keys.
-        # @param budget_tokens [Integer] The maximum number of tokens for internal reasoning (default: 4096).
         #
+        # @yield [retry_count] Yields the number of retries attempted to the caller for tracking purposes.
         # @return [String] The AI's response text.
         #
         # @example Sending a single message as a string:
         #   api_key = "your_anthropic_api_key"
         #   messages = "What is the capital of Italy?"
-        #   Claude.query_with_memory(api_key, messages)
+        #   Claude.query_with_memory(api_key, messages) { |retry_count| puts "Retry ##{retry_count}" }
         #   # => "The capital of Italy is Rome."
         #
-        # @example Sending multiple messages as an array:
-        #   api_key = "your_anthropic_api_key"
-        #   messages = [
-        #     { role: "user", content: "Tell me a joke." },
-        #     { role: "user", content: "Explain quantum mechanics simply." }
-        #   ]
-        #   Claude.query_with_memory(api_key, messages)
-        #   # => "Here’s a joke: Why did the physicist cross the road? To observe the other side!"
-        #
         # @note
-        #   - The method retries the query in case of errors, such as network failures, JSON parsing errors,
-        #     or bad responses from the Claude API.
-        #   - A delay (`sleep 1`) is included to prevent token throttling and race conditions.
-        #   - The method currently lacks data tracking functionality (marked as TODO).
+        #   - Retries are limited to 5 attempts for network errors, JSON parsing errors, or bad responses.
+        #   - A delay (`sleep 10`) is used between retries to prevent throttling.
+        #   - A final delay (`sleep 1`) avoids race conditions and token throttling.
         #
-        # @raise [JSON::ParserError] If the response body cannot be parsed as JSON.
-        # @raise [RuntimeError] If no valid response is received after retries.
+        # @raise [RuntimeError] If no valid response is received after maximum retries.
         #
         # @see HTTParty.post
         # @see JSON.parse
-        def query_with_memory(api_key, messages, budget_tokens: CONFIG[:anthropic_thinking_budget])
-          # Convert string input to array of message hashes if necessary
+        def query_with_memory(api_key, messages)
           messages = messages.instance_of?(String) ? [{ role: 'user', content: messages }] : messages
-
-          # Define headers for the API request
           headers = {
             'x-api-key' => api_key,
             'anthropic-version' => '2023-06-01',
             'content-type' => 'application/json',
             'anthropic-beta' => 'prompt-caching-2024-07-31'
           }
-
-          # Construct the request body
           body = {
             'model': CONFIG[:anthropic_gpt_model],
             'max_tokens': CONFIG[:anthropic_max_tokens],
-            'messages': messages,
-            'thinking': {
-              'type': 'enabled',
-              'budget_tokens': budget_tokens
-            }
+            'messages': messages
           }
 
-          begin
-            # Send the POST request to the Claude API
-            response = HTTParty.post(
-              'https://api.anthropic.com/v1/messages',
-              headers: headers,
-              body: body.to_json
-            )
-          rescue => e
-            puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
-            sleep 10
-            return query_with_memory(api_key, messages, budget_tokens: budget_tokens)
-          end
+          max_retries = 5
+          retries = 0
+          output = nil
 
-          # Avoid race conditions and token throttling
-          sleep 1
+          while retries <= max_retries
+            begin
+              response = HTTParty.post(
+                'https://api.anthropic.com/v1/messages',
+                headers: headers,
+                body: body.to_json
+              )
+              output = JSON.parse(response.body).dig('content', 0, 'text')
+              break unless output.nil? # Success if output is non-nil
 
-          # Parse the response safely
-          begin
-            response_body = JSON.parse(response.body)
-          rescue JSON::ParserError => e
-            puts "Error parsing JSON: #{e.message}"
-            sleep 10
-            return query_with_memory(api_key, messages, budget_tokens: budget_tokens)
-          end
-
-          # Handle different response scenarios
-          if response_body.key?('error')
-            puts "API Error: #{response_body['error']['message']}"
-            sleep 10
-            return query_with_memory(api_key, messages, budget_tokens: budget_tokens)
-          elsif !response_body.key?('content')
-            puts "Error: No 'content' key in response."
-            ap response_body
-            sleep 10
-            return query_with_memory(api_key, messages, budget_tokens: budget_tokens)
-          else
-            content = response_body['content']
-            unless content.is_a?(Array)
-              puts "Error: 'content' is not an array."
-              ap content
+              puts 'Error: Claude API provided a bad response. Retrying query...'
+              retries += 1
+              yield retries if block_given? # Report retry count
               sleep 10
-              return query_with_memory(api_key, messages, budget_tokens: budget_tokens)
-            end
-
-            text_block = content.find { |block| block['type'] == 'text' }
-            if text_block
-              output = text_block['text']
-            else
-              puts "Error: No block with type 'text' found in content."
-              ap content
+            rescue => e # Catch all errors (network, JSON parsing, etc.)
+              puts "Error: #{e.class}: '#{e.message}'. Retrying query..."
+              retries += 1
+              yield retries if block_given? # Report retry count
               sleep 10
-              return query_with_memory(api_key, messages, budget_tokens: budget_tokens)
             end
           end
 
-          # Store and return the output
+          if output.nil?
+            raise "Claude failed to provide a valid response after #{max_retries} retries."
+          end
+
+          sleep 1 # Avoid race conditions and token throttling
           @last_output = output
           output
         end
@@ -144,7 +100,7 @@ module GPTK
         #   GPTK::AI::Claude.query_to_rails_code(api_key, prompt: prompt)
         #
         def query_to_rails_code(api_key, prompt: nil)
-          # Retrieve file paths from config (assumed to be an array of strings)
+          # Retrieve file paths from config (now an array of strings)
           file_paths = GPTK::CONFIG[:rails_files]
           unless file_paths.is_a?(Array) && !file_paths.empty?
             raise "Invalid or missing file_paths in GPTK::CONFIG[:rails][:file_paths]"
@@ -165,10 +121,25 @@ module GPTK
               current_prompt = prompt
               first_iteration = false
             else
-              print "\nEnter prompt (or 'exit' to quit): "
-              user_input = gets.chomp
-              break if user_input.downcase == 'exit'
-              puts 'Submitting query to Claude...'
+              puts "\nEnter your prompt (paste multi-line text and press Ctrl-D (Unix) or Ctrl-Z (Windows) when done, or type 'exit' to quit):"
+              input = String.new
+              begin
+                while (line = STDIN.gets)
+                  # If the user types 'exit' on a line by itself, exit the loop
+                  if line.strip.downcase == 'exit'
+                    puts 'Exiting...'
+                    return  # Exit the entire method
+                  end
+                  input << line
+                end
+              rescue EOFError
+                # Ctrl-D (Unix) or Ctrl-Z (Windows) was pressed, proceed with the input
+              end
+              user_input = input.chomp
+              if user_input.strip.empty?
+                puts 'No input provided. Please try again.'
+                next
+              end
               current_prompt = user_input
             end
 
@@ -192,7 +163,7 @@ module GPTK
               current_codes_str = current_codes.map { |fp, code| "#{fp}:\n\n```\n#{code}\n```" }.join("\n\n")
               full_prompt = "#{instruction}\n\nCurrent code state:\n#{current_codes_str}\n\nAdditional requirements: #{current_prompt}\n\nUpdate the code for '#{file_path}'. Output ONLY the raw code without any formatting, explanation, or code delimiters."
 
-              # Send query to Claude API with extended thinking
+              # Send query to Claude API
               messages = [{ role: 'user', content: full_prompt }]
               result = query_with_memory(api_key, messages)
 
